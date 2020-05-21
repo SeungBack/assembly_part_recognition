@@ -1,0 +1,4 @@
+<launch>
+  <rosparam command="load" file="$(find assembly_part_recognition)/param/furniture_part_segmentation.yaml" ns="furniture_part_segmentation" />
+  <node name="furniture_part_segmenter" pkg="assembly_part_recognition" type="furniture_part_segmenter.py" output="screen"/>
+</launch>

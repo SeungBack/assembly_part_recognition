@@ -17,13 +17,20 @@ import sys
 import os
 
 class_idx2name = {
-    1: "side_left",
-    2: "long",
+    1: "side",
+    2: "long_short",
     3: "middle",
-    4: "short",
-    5: "side_right",
-    6: "bottom",
+    4: "bottom",
 }
+
+class_idx2color = {
+    1: (255, 0, 0),
+    2: (0, 0, 255),
+    3: (255, 0, 255),
+    4: (0, 255, 255),
+    5: (255, 255, 0),
+    6: (0, 255, 128)}
+
 
 class PartSegmenter:
 
@@ -33,7 +40,7 @@ class PartSegmenter:
         rospy.init_node('part_recognizier')
         rospy.loginfo("Starting part_segmenter.py")
 
-        self.seg_params = rospy.get_param("segmentation")
+        self.seg_params = rospy.get_param("furniture_part_segmentation")
         self.mask_pub = rospy.Publisher('seg_mask/furniture_part', Image, queue_size=10)
 
 
@@ -48,8 +55,8 @@ class PartSegmenter:
         self.bridge = cv_bridge.CvBridge()
 
         # get rgb-depth images of same time step
-        rgb_sub = message_filters.Subscriber('rgb/image_raw', Image)
-        depth_sub = message_filters.Subscriber('depth_to_rgb/image_raw', Image)
+        rgb_sub = message_filters.Subscriber('azure1/rgb/image_raw', Image)
+        depth_sub = message_filters.Subscriber('azure1/depth_to_rgb/image_raw', Image)
         self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size=5, slop=0.1)
         rospy.loginfo("Starting rgb-d subscriber with time synchronizer")
         # from rgb-depth images, inference the results and publish it
@@ -64,7 +71,7 @@ class PartSegmenter:
         with open(os.path.join(self.seg_params["pytorch_module_path"], 'config', self.seg_params["config_file"])) as config_file:
             config = json.load(config_file)
         # build model
-        self.model = maskrcnn.get_model_instance_segmentation(num_classes=7, config=config)
+        self.model = maskrcnn.get_model_instance_segmentation(num_classes=5, config=config)
         self.model.load_state_dict(torch.load(self.seg_params["weight_path"]))
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
@@ -72,9 +79,10 @@ class PartSegmenter:
 
     def inference(self, rgb, depth):
 
+        rospy.loginfo_once("Segmenting furniture part area")
         rgb = self.bridge.imgmsg_to_cv2(rgb, desired_encoding='bgr8')
         rgb = PIL.Image.fromarray(np.uint8(rgb), mode="RGB")
-        rgb_img = rgb.resize((640, 480), PIL.Image.BICUBIC)
+        rgb_img = rgb.resize((self.seg_params["width"], self.seg_params["height"]), PIL.Image.BICUBIC)
         rgb = self.rgb_transform(rgb_img)
 
         pred_results = self.model([rgb.to(self.device)])[0]
@@ -101,10 +109,9 @@ class PartSegmenter:
                 mask[mask < 0.5] = 0
 
                 color = 255*np.random.random(3)
-                r = mask * color[0]
-                g = mask * color[1]
-                b = mask * color[2]
-
+                r = mask * class_idx2color[labels[i]][0]
+                g = mask * class_idx2color[labels[i]][1]
+                b = mask * class_idx2color[labels[i]][2]
                 stacked_img = np.stack((r, g, b), axis=0)
                 stacked_img = stacked_img.transpose(1, 2, 0)
 
@@ -120,7 +127,7 @@ class PartSegmenter:
 
 if __name__ == '__main__':
 
-    part_segmenter = PartSegmenter()
+    furniture_part_segmenter = PartSegmenter()
     rospy.spin()
 
 
