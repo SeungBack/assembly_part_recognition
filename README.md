@@ -28,7 +28,9 @@ Furniture recognizer for furniture assembly project using Mask R-CNN
 ```
 ROS_NAMESPACE=azure2 roslaunch azure_kinect_ros_driver driver.launch sensor_sn:=000853594412 wired_sync_mode:=2 subordinate_delay_off_master_usec:=160 fps:=5 color_resolution:=720P depth_mode:=WFOV_UNBINNED tf_prefix:=azure2_
 ROS_NAMESPACE=azure1 roslaunch azure_kinect_ros_driver driver.launch sensor_sn:=000696793812 wired_sync_mode:=1 fps:=5 color_resolution:=720P depth_mode:=WFOV_UNBINNED tf_prefix:=azure1_
-roslaunch assembly_part_recognition connector_segmentation.launch 
+roslaunch assembly_part_recognition furniture_part_segmentation.launch
+roslaunch assembly_part_recognition connector_segmentation.launch
+roslaunch assembly_part_recognition scene_segmentation.launch 
 ```
 
 ## Authors
