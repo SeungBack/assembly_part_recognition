@@ -58,6 +58,7 @@ class SceneSegmenter:
         rospy.loginfo_once("Segmenting scene area")
         rgb = self.bridge.imgmsg_to_cv2(rgb, desired_encoding='bgr8')
         rgb = PIL.Image.fromarray(np.uint8(rgb), mode="RGB")
+        # [768, 1024, 3]
         rgb_img = rgb.resize((self.seg_params["width"], self.seg_params["height"]), PIL.Image.BICUBIC)
         rgb = np.array(rgb_img)
         # transform to C, H, W add batch dimension
@@ -65,6 +66,7 @@ class SceneSegmenter:
         rgb = rgb.reshape([1, 3, self.seg_params["height"], self.seg_params["width"]])
         rgb = torch.from_numpy(rgb).float()
         rgb = rgb / 255 # [1, 3, 768, 1024]
+
         pred_results = self.model(rgb.to(self.device))
         probs = F.softmax(pred_results, dim=1)
         probs = probs.squeeze(0)
@@ -72,7 +74,7 @@ class SceneSegmenter:
         pred_transform = transforms.Compose(
             [
                 transforms.ToPILImage(),
-                transforms.Resize((self.seg_params["width"], self.seg_params["height"])),
+                transforms.Resize((self.seg_params["height"], self.seg_params["width"])),
                 transforms.ToTensor()
             ]
         )
@@ -87,10 +89,10 @@ class SceneSegmenter:
 
     def visualize_prediction(self, rgb_img, full_mask):
         
-        rgb_img = np.uint8(rgb_img)
+        rgb_img = np.uint8(rgb_img) # [768, 1024, 3]
 
         full_mask = full_mask.astype(np.uint8)
-        full_mask = 255*full_mask.transpose((2, 1, 0))
+        full_mask = 255*full_mask.transpose((1, 2, 0))
         rgb_img = cv2.addWeighted(rgb_img, 1, full_mask, 0.5, 0)
 
         return np.uint8(rgb_img)
