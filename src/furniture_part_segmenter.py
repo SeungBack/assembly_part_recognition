@@ -96,7 +96,7 @@ class PartSegmenter:
 
         self.mask_pub.publish(self.bridge.cv2_to_imgmsg(vis_results, "bgr8"))
 
-    def visualize_prediction(self, rgb_img, masks, boxes, labels, score, thresh=0.5):
+    def visualize_prediction(self, rgb_img, masks, boxes, labels, score, thresh=0.1):
         
         rgb_img = np.uint8(rgb_img)
         if len(labels) == 0:
