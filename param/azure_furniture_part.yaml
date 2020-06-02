@@ -1,5 +1,5 @@
 pytorch_module_path: "/home/demo/Workspace/Assembly-Part-Segmentation/furniture_part_segmentation"
 config_file: "rgb.json"
-weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weights/furniture_part/furniture_part_SIM_v3.tar"
+weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weights/furniture_part/epoch_18.tar"
 width: 1024
 height: 768

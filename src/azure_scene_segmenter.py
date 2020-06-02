@@ -23,11 +23,11 @@ class SceneSegmenter:
     def __init__(self):
 
         # initalize node
-        rospy.init_node('scene_recognizier')
-        rospy.loginfo("Starting scene_segmenter.py")
+        rospy.init_node('azure_scene_segmenter')
+        rospy.loginfo("Starting azure_scene_segmenter.py")
 
-        self.seg_params = rospy.get_param("scene_segmentation")
-        self.mask_pub = rospy.Publisher('seg_mask/scene', Image, queue_size=10)
+        self.seg_params = rospy.get_param("azure_scene")
+        self.mask_pub = rospy.Publisher('seg_mask/azure/scene', Image, queue_size=10)
 
 
         self.initialize_model()

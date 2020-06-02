@@ -17,28 +17,32 @@ import sys
 import os
 
 class_idx2name = {
-    1: "bracket",
-    2: "wood_pin",
-    3: "flathead_screw",
-    4: "panhead_screw",
+    1: "side",
+    2: "long_short",
+    3: "middle",
+    4: "bottom",
 }
 
 class_idx2color = {
     1: (255, 0, 0),
     2: (0, 0, 255),
     3: (255, 0, 255),
-    4: (0, 255, 255)}
+    4: (0, 255, 255),
+    5: (255, 255, 0),
+    6: (0, 255, 128)}
+
 
 class PartSegmenter:
 
     def __init__(self):
 
         # initalize node
-        rospy.init_node('connector_segmenter')
-        rospy.loginfo("Starting connector_segmenter.py")
+        rospy.init_node('azure_furniture_part_segmenter')
+        rospy.loginfo("Starting azure_furniture_part_segmenter.py")
 
-        self.seg_params = rospy.get_param("connector_segmentation")
-        self.mask_pub = rospy.Publisher('seg_mask/connector', Image, queue_size=10)
+        self.seg_params = rospy.get_param("azure_furniture_part")
+        self.mask_pub = rospy.Publisher('seg_mask/azure/furniture_part', Image, queue_size=10)
+
 
         self.initialize_model()
         self.rgb_transform = transforms.Compose([
@@ -47,6 +51,7 @@ class PartSegmenter:
                             mean=[0.485, 0.456, 0.406],
                             std=[0.229, 0.224, 0.225]),
                             ])
+
         self.bridge = cv_bridge.CvBridge()
 
         # get rgb-depth images of same time step
@@ -73,7 +78,8 @@ class PartSegmenter:
         self.model.eval()
 
     def inference(self, rgb, depth):
-        rospy.loginfo_once("Segmenting connector area")
+
+        rospy.loginfo_once("Segmenting furniture part area")
         rgb = self.bridge.imgmsg_to_cv2(rgb, desired_encoding='bgr8')
         rgb = PIL.Image.fromarray(np.uint8(rgb), mode="RGB")
         rgb_img = rgb.resize((self.seg_params["width"], self.seg_params["height"]), PIL.Image.BICUBIC)
@@ -90,7 +96,7 @@ class PartSegmenter:
 
         self.mask_pub.publish(self.bridge.cv2_to_imgmsg(vis_results, "bgr8"))
 
-    def visualize_prediction(self, rgb_img, masks, boxes, labels, score, thresh=0.5):
+    def visualize_prediction(self, rgb_img, masks, boxes, labels, score, thresh=0.1):
         
         rgb_img = np.uint8(rgb_img)
         if len(labels) == 0:
@@ -102,6 +108,7 @@ class PartSegmenter:
                 mask[mask >= 0.5] = 1
                 mask[mask < 0.5] = 0
 
+                color = 255*np.random.random(3)
                 r = mask * class_idx2color[labels[i]][0]
                 g = mask * class_idx2color[labels[i]][1]
                 b = mask * class_idx2color[labels[i]][2]
@@ -113,36 +120,14 @@ class PartSegmenter:
                 cv2.putText(rgb_img, class_idx2name[labels[i]] + str(score[i].item())[:4], \
                     (boxes[i][0], boxes[i][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255 ,0), 1)
 
-                # draw object axis
-                _, cnt, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                rect = cv2.minAreaRect(cnt[0])
-                box = cv2.boxPoints(rect)
-                box = np.int0(box)
-
-                center_p = tuple(np.int0(rect[0]))
-                size = tuple(np.int0(rect[1]))
-                angle = np.int0(rect[2])
-                cv2.circle(rgb_img, center_p, 2, (255, 0, 0), -1)
-                
-                cv2.drawContours(rgb_img, [box], 0, (0, 0, 255), 1)
-
-                left_l = np.sqrt((box[1][0]-box[0][0])**2 + (box[1][1]-box[0][1])**2).astype(int)
-                right_l = np.sqrt((box[3][0]-box[0][0])**2 + (box[3][1]-box[0][1])**2).astype(int)
-
-                if left_l > right_l:
-                    angle += 90
-
-                pt1 = (center_p[0] - int(max(size)/2 * np.cos(np.radians(angle))), center_p[1]  - int(max(size)/2 * np.sin(np.radians(angle))))
-                pt2 = (center_p[0] + int(max(size)/2 * np.cos(np.radians(angle))), center_p[1]  + int(max(size)/2 * np.sin(np.radians(angle))))
-                cv2.line(rgb_img, pt1, pt2,(255,0,0),2)
-           
-
         return np.uint8(rgb_img)
+
+
 
 
 if __name__ == '__main__':
 
-    connector_segmenter = PartSegmenter()
+    furniture_part_segmenter = PartSegmenter()
     rospy.spin()
 
 

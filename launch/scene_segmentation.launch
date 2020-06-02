@@ -1,4 +1,0 @@
-<launch>
-  <rosparam command="load" file="$(find assembly_part_recognition)/param/scene_segmentation.yaml" ns="scene_segmentation" />
-  <node name="scene_segmenter" pkg="assembly_part_recognition" type="scene_segmenter.py" output="screen"/>
-</launch>
