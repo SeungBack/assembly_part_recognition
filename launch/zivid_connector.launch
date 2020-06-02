@@ -1,0 +1,4 @@
+<launch>
+  <rosparam command="load" file="$(find assembly_part_recognition)/param/zivid_connector.yaml" ns="zivid_connector" />
+  <node name="zivid_connector_segmenter" pkg="assembly_part_recognition" type="zivid_connector_segmenter.py" output="screen"/>
+</launch>

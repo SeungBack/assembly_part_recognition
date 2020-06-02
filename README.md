@@ -10,7 +10,6 @@ Furniture recognizer for furniture assembly project using Mask R-CNN
 - merge inference results from multiple camera
 - add 6D pose estimation module
 - object tracking and filtering
-- Zivid camera support
 
 ## Getting Started
 
@@ -23,7 +22,7 @@ Furniture recognizer for furniture assembly project using Mask R-CNN
 - zivid_ros_driver
 - assembly part segmentation
 
-### Furniture part Segmentation
+### Azure 
 
 ```
 ROS_NAMESPACE=azure2 roslaunch azure_kinect_ros_driver driver.launch sensor_sn:=000853594412 wired_sync_mode:=2 subordinate_delay_off_master_usec:=160 fps:=5 color_resolution:=720P depth_mode:=WFOV_UNBINNED tf_prefix:=azure2_
@@ -32,6 +31,17 @@ roslaunch assembly_part_recognition furniture_part_segmentation.launch
 roslaunch assembly_part_recognition connector_segmentation.launch
 roslaunch assembly_part_recognition scene_segmentation.launch 
 ```
+
+### Zivid
+```
+roscore
+ROS_NAMESPACE=zivid_camera rosrun zivid_camera zivid_camera_node
+python ~/catkin_ws/src/assembly_camera_manager/scripts/receive_zivid_repeat.py
+roslaunch assembly_part_recognition zivid_connector.launch
+roslaunch assembly_part_recognition zivid_funiture_part.launch
+roslaunch assembly_part_recognition zivid_scene.launch
+```
+
 
 ## Authors
 

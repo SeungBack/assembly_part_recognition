@@ -1,0 +1,5 @@
+pytorch_module_path: "/home/demo/Workspace/Assembly-Part-Segmentation/connector_segmentation"
+config_file: "rgb_only.json"
+weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weights/connector/epoch_14.tar"
+width: 1920
+height: 1080
