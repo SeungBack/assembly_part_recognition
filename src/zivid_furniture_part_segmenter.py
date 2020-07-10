@@ -17,6 +17,10 @@ import torch
 import yaml
 import sys
 import os
+import time
+# from scipy import sparse
+import math
+
 
 class_idx2name = {
     1: "side",
@@ -54,6 +58,9 @@ class PartSegmenter:
                             ])
         self.bridge = cv_bridge.CvBridge()
 
+        self.depth_val_min = 0.4
+        self.depth_val_max = 2.25
+
         rgb_sub = message_filters.Subscriber("/zivid_camera/color/image_color", Image)
         depth_sub = message_filters.Subscriber("/zivid_camera/depth/image_raw", Image)
         self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size=5, slop=0.1)
@@ -70,27 +77,92 @@ class PartSegmenter:
         with open(os.path.join(self.seg_params["pytorch_module_path"], 'config', self.seg_params["config_file"])) as config_file:
             config = json.load(config_file)
         # build model
-        self.model = maskrcnn.get_model_instance_segmentation(num_classes=5, config=config)
+        self.model = maskrcnn.get_model_instance_segmentation(num_classes=7, config=config)
         self.model.load_state_dict(torch.load(self.seg_params["weight_path"]))
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
         self.model.eval()
 
+    def save_inference_data(self, rgb, depth):
+        rgb_save = self.bridge.imgmsg_to_cv2(rgb, desired_encoding='bgr8')
+        rgb_save = cv2.cvtColor(rgb_save, cv2.COLOR_BGR2RGB)
+        rgb_save = PIL.Image.fromarray(np.uint8(rgb_save), mode="RGB")
+        depth_save = self.bridge.imgmsg_to_cv2(depth)
+        save_dir = "/home/demo/catkin_ws/src/assembly_part_recognition/inference_data_zivid"
+        if not os.path.isdir(save_dir): os.makedirs(save_dir)
+        save_name = "{}".format(time.time())
+
+        rgb_save.save(os.path.join(save_dir, "{}.png".format(save_name)))
+        np.save(os.path.join(save_dir, "{}.npy".format(save_name)), depth_save)
+
+        # np.save(os.path.join(save_dir, save_name + "_rgb.npy"), rgb_save)
+        # np.save(os.path.join(save_dir, save_name + "_depth.npy"), depth_save)
+
+
     def inference(self, rgb, depth):
+        self.save_inference_data(rgb, depth)
+
         rospy.loginfo_once("Segmenting furniture_part area")
         rgb = self.bridge.imgmsg_to_cv2(rgb, desired_encoding='bgr8')
         rgb = PIL.Image.fromarray(np.uint8(rgb), mode="RGB")
         rgb_img = rgb.resize((self.seg_params["width"], self.seg_params["height"]), PIL.Image.BICUBIC)
         rgb = self.rgb_transform(rgb_img)
 
-        pred_results = self.model([rgb.to(self.device)])[0]
+        # load config files
+        with open(os.path.join(self.seg_params["pytorch_module_path"], 'config', self.seg_params["config_file"])) as config_file:
+            config = json.load(config_file)
+        
+        if config["depth_type"] != "None":
+            # original code
+            # depth = self.bridge.imgmsg_to_cv2(depth)
+            # depth = np.expand_dims(np.asarray(depth), -1)
+            # depth = np.repeat(depth, 3, -1)
+            # depth = cv2.resize(depth, dsize=(self.seg_params["width"], self.seg_params["height"]), interpolation=cv2.INTER_AREA)
+            # depth = torch.from_numpy(np.float32(depth))
+            # depth = depth.transpose(0, 2).transpose(1, 2)
+
+            depth = self.bridge.imgmsg_to_cv2(depth)
+            depth = cv2.resize(depth, dsize=(self.seg_params["width"], self.seg_params["height"]), interpolation=cv2.INTER_AREA)
+            mask = np.isnan(depth.copy()).astype('uint8')
+            depth = np.where(np.isnan(depth), 0, depth)           
+
+            values = np.unique(depth)
+            max_val = max(values)
+            min_val = min(values)
+            depth = np.uint8((depth - min_val) / (max_val - min_val) * 255)
+            inpainted = cv2.inpaint(depth, mask, 3, cv2.INPAINT_NS)
+
+            depth = np.expand_dims(np.asarray(depth), -1)
+            depth = np.repeat(depth, 3, -1)
+            depth = torch.from_numpy(np.float32(depth))
+            depth = depth.transpose(0, 2).transpose(1, 2)
+
+            depth = torch.clamp(depth, min=self.depth_val_min, max=self.depth_val_max)
+            depth = (depth-self.depth_val_min) / (self.depth_val_max-self.depth_val_min) # 3500-8000 to 0-1
+
+            # create corresponding mask
+            val_mask = torch.ones([depth.shape[1], depth.shape[2]])
+            val_mask[np.where(depth[0] == 0.0)] = 0
+            val_mask = val_mask.unsqueeze(0)
+
+            # depth, val_mask = self.RandomErasing(depth, val_mask)
+            # depth, val_mask = self.SaltPepperNoise(depth, val_mask)
+            # print(depth)
+
+            input_tensor = torch.cat([rgb, depth, val_mask], dim=0)
+            input_tensor = input_tensor.unsqueeze(0)
+        else:
+            input_tensor = rgb.unsqueeze(0)
+
+        # pred_results = self.model([rgb.to(self.device)])[0]
+        pred_results = self.model(input_tensor.to(self.device))[0]
 
         pred_masks = pred_results["masks"].cpu().detach().numpy()
         pred_boxes = pred_results['boxes'].cpu().detach().numpy()
         pred_labels = pred_results['labels'].cpu().detach().numpy()
         pred_scores = pred_results['scores'].cpu().detach().numpy()
-        
-        vis_results = self.visualize_prediction(rgb_img, pred_masks, pred_boxes, pred_labels, pred_scores)
+        print("Prediciton result: ", pred_scores, pred_labels)
+        vis_results = self.visualize_prediction(rgb_img, pred_masks, pred_boxes, pred_labels, pred_scores, thresh=0.3)
 
         self.mask_pub.publish(self.bridge.cv2_to_imgmsg(vis_results, "bgr8"))
 
@@ -115,11 +187,10 @@ class PartSegmenter:
 
                 rgb_img = cv2.addWeighted(rgb_img, 1, stacked_img.astype(np.uint8), 0.5, 0)
                 cv2.rectangle(rgb_img, (boxes[i][0], boxes[i][1]), (boxes[i][2], boxes[i][3]), (0, 255, 0), 1)
-                cv2.putText(rgb_img, class_idx2name[labels[i]] + str(score[i].item())[:4], \
-                    (boxes[i][0], boxes[i][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255 ,0), 1)
+                # cv2.putText(rgb_img, class_idx2name[labels[i]] + str(score[i].item())[:4], \
+                #     (boxes[i][0], boxes[i][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255 ,0), 1)
 
         return np.uint8(rgb_img)
-
 
 if __name__ == '__main__':
 

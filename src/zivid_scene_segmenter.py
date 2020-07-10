@@ -40,6 +40,9 @@ class SceneSegmenter:
                             ])
         self.bridge = cv_bridge.CvBridge()
 
+        self.depth_val_min = 0.4
+        self.depth_val_max = 2.25
+
         rgb_sub = message_filters.Subscriber("/zivid_camera/color/image_color", Image)
         depth_sub = message_filters.Subscriber("/zivid_camera/depth/image_raw", Image)
         self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size=5, slop=0.1)
@@ -53,7 +56,7 @@ class SceneSegmenter:
         sys.path.append(self.seg_params["pytorch_module_path"])
         from unet import UNet
         # build model
-        self.model = UNet(n_channels=3, n_classes=3)
+        self.model = UNet(n_channels=4, n_classes=3)
         self.model.load_state_dict(torch.load(self.seg_params["weight_path"]))
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
@@ -72,8 +75,35 @@ class SceneSegmenter:
         rgb = rgb.reshape([1, 3, self.seg_params["height"], self.seg_params["width"]])
         rgb = torch.from_numpy(rgb).float()
         rgb = rgb / 255 # [1, 3, 768, 1024]
+        rgb.unsqueeze(0)
 
-        pred_results = self.model(rgb.to(self.device))
+
+        depth = self.bridge.imgmsg_to_cv2(depth)
+        depth = cv2.resize(depth, dsize=(self.seg_params["width"], self.seg_params["height"]), interpolation=cv2.INTER_AREA)
+        mask = np.isnan(depth.copy()).astype('uint8')
+        depth = np.where(np.isnan(depth), 0, depth)           
+
+        values = np.unique(depth)
+        max_val = max(values)
+        min_val = min(values)
+        depth = np.uint8((depth - min_val) / (max_val - min_val) * 255)
+        inpainted = cv2.inpaint(depth, mask, 3, cv2.INPAINT_NS)
+
+        depth = np.expand_dims(np.asarray(depth), -1)
+        depth = np.repeat(depth, 3, -1)
+        depth = torch.from_numpy(np.float32(depth))
+        depth = depth.transpose(0, 2).transpose(1, 2)
+
+        depth = torch.clamp(depth, min=self.depth_val_min, max=self.depth_val_max)
+        depth = (depth-self.depth_val_min) / (self.depth_val_max-self.depth_val_min) # 3500-8000 to 0-1
+        depth = depth.unsqueeze(0)
+
+       
+        rgbd = torch.cat((rgb, depth), axis=1)[:,:4] # rgb 3channel + depth 1channel condat rgbd 4channel input
+      
+
+
+        pred_results = self.model(rgbd.to(self.device))
         probs = F.softmax(pred_results, dim=1)
         probs = probs.squeeze(0)
 

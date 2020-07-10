@@ -1,5 +1,5 @@
 pytorch_module_path: "/home/demo/Workspace/assembly_scene_segmentation"
-weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weights/scene/CP_epoch3.pth"
-out_threshold: 0.2
-width: 1024
-height: 768
+weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weights/scene/CP_epoch2.pth"
+out_threshold: 0.5
+width: 480
+height: 270
