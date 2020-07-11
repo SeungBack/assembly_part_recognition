@@ -2,32 +2,27 @@
 
 import torch
 import torchvision
+import torchvision.transforms as transforms
 import argparse
 import json
 import rospy
+
 from zivid_camera.srv import *
-from std_msgs.msg import String
-from sensor_msgs.msg import PointCloud2, Image
+
 import cv2, cv_bridge
-import torchvision.transforms as transforms
 import numpy as np
 import PIL
 import message_filters
-import torch
 import yaml
 import sys
 import os
 import time
-# from scipy import sparse
 import math
 
+from std_msgs.msg import String, Header
+from sensor_msgs.msg import PointCloud2, Image, RegionOfInterest
+from assembly_part_recognition.msg import InstanceSegmentation2D
 
-class_idx2name = {
-    1: "side",
-    2: "long_short",
-    3: "middle",
-    4: "bottom",
-}
 
 class_idx2color = {
     1: (255, 0, 0),
@@ -47,7 +42,9 @@ class PartSegmenter:
         rospy.loginfo("Starting zivid_furniture_part_segmenter.py")
 
         self.seg_params = rospy.get_param("zivid_furniture_part")
-        self.mask_pub = rospy.Publisher('seg_mask/zivid/furniture_part', Image, queue_size=2)
+        self.vis_pub = rospy.Publisher('/assembly/zivid/furniture_part/is_vis_results', Image, queue_size=1)
+        self.is_pub = rospy.Publisher('/assembly/zivid/furniture_part/is_results', InstanceSegmentation2D, queue_size=1)
+
 
         self.initialize_model()
         self.rgb_transform = transforms.Compose([
@@ -60,6 +57,7 @@ class PartSegmenter:
 
         self.depth_val_min = 0.4
         self.depth_val_max = 2.25
+        self.class_names = ["background", "left_side", "right_side", "middle", "long", "short", "bottom"]
 
         rgb_sub = message_filters.Subscriber("/zivid_camera/color/image_color", Image)
         depth_sub = message_filters.Subscriber("/zivid_camera/depth/image_raw", Image)
@@ -161,10 +159,43 @@ class PartSegmenter:
         pred_boxes = pred_results['boxes'].cpu().detach().numpy()
         pred_labels = pred_results['labels'].cpu().detach().numpy()
         pred_scores = pred_results['scores'].cpu().detach().numpy()
-        print("Prediciton result: ", pred_scores, pred_labels)
         vis_results = self.visualize_prediction(rgb_img, pred_masks, pred_boxes, pred_labels, pred_scores, thresh=0.3)
 
-        self.mask_pub.publish(self.bridge.cv2_to_imgmsg(vis_results, "bgr8"))
+        # inference result -> ros message (Detection2D)
+        is_msg = InstanceSegmentation2D()
+        is_msg.header = Header()
+        is_msg.header.stamp = rospy.get_rostime()
+        
+        scores = []
+        for i, (x1, y1, x2, y2) in enumerate(pred_boxes):
+            box = RegionOfInterest()
+            box.x_offset = np.asscalar(x1)
+            box.y_offset = np.asscalar(y1)
+            box.height = np.asscalar(y2 - y1)
+            box.width = np.asscalar(x2 - x1)
+            is_msg.boxes.append(box)
+            
+            class_id = pred_labels[i]    
+            is_msg.class_ids.append(class_id) 
+
+            class_name = self.class_names[class_id]
+            is_msg.class_names.append(class_name)
+
+            score = pred_scores[i]
+            is_msg.scores.append(score)
+
+            mask = Image()
+            mask.header = is_msg.header
+            mask.height = pred_masks[i].shape[0]
+            mask.width = pred_masks[i].shape[1]
+            mask.encoding = "mono8"
+            mask.is_bigendian = False
+            mask.step = mask.width
+            mask.data = (pred_masks[i][0] * 255).tobytes()
+            is_msg.masks.append(mask)        
+
+        self.is_pub.publish(is_msg)
+        self.vis_pub.publish(self.bridge.cv2_to_imgmsg(vis_results, "bgr8"))
 
     def visualize_prediction(self, rgb_img, masks, boxes, labels, score, thresh=0.5):
         
@@ -187,8 +218,8 @@ class PartSegmenter:
 
                 rgb_img = cv2.addWeighted(rgb_img, 1, stacked_img.astype(np.uint8), 0.5, 0)
                 cv2.rectangle(rgb_img, (boxes[i][0], boxes[i][1]), (boxes[i][2], boxes[i][3]), (0, 255, 0), 1)
-                # cv2.putText(rgb_img, class_idx2name[labels[i]] + str(score[i].item())[:4], \
-                #     (boxes[i][0], boxes[i][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255 ,0), 1)
+                cv2.putText(rgb_img, self.class_names[labels[i]] + str(score[i].item())[:4], \
+                    (boxes[i][0], boxes[i][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255 ,0), 1)
 
         return np.uint8(rgb_img)
 

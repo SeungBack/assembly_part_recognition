@@ -8,8 +8,8 @@ Furniture recognizer for furniture assembly project using Mask R-CNN
 ### To Do
 - segmentation mask filtering and refinement
 - merge inference results from multiple camera
-- add 6D pose estimation module
 - object tracking and filtering
+- list up the dependencies
 
 ## Getting Started
 
@@ -18,8 +18,8 @@ Furniture recognizer for furniture assembly project using Mask R-CNN
 - python 2.7 (local, /usr/bin/python)
 - torch 1.3.0
 - torchvision 0.4.1
-- azure_kinect_ros_driver
-- zivid_ros_driver
+- [azure_kinect_ros_driver](https://github.com/microsoft/Azure_Kinect_ROS_Driver)
+- [zivid_ros_driver](https://github.com/zivid/zivid-ros)
 - assembly part segmentation
 
 ### Azure 
@@ -41,6 +41,7 @@ python ~/catkin_ws/src/assembly_camera_manager/scripts/receive_zivid_repeat.py
 roslaunch assembly_part_recognition zivid_connector.launch
 roslaunch assembly_part_recognition zivid_funiture_part.launch
 roslaunch assembly_part_recognition zivid_scene.launch
+roslaunch assembly_part_recognition 6d_pose_estimator.launch
 ```
 
 

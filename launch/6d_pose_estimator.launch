@@ -1,0 +1,4 @@
+<launch>
+  <rosparam command="load" file="$(find assembly_part_recognition)/param/6d_pose_estimation.yaml" ns="6d_pose_estimation" />
+  <node name="object_pose_estimator" pkg="assembly_part_recognition" type="6d_pose_estimator.py" output="screen"/>
+</launch>
