@@ -41,9 +41,10 @@ class PartSegmenter:
         rospy.init_node('zivid_furniture_part_segmenter')
         rospy.loginfo("Starting zivid_furniture_part_segmenter.py")
 
-        self.seg_params = rospy.get_param("zivid_furniture_part")
+        self.params = rospy.get_param("zivid_furniture_part")
         self.vis_pub = rospy.Publisher('/assembly/zivid/furniture_part/is_vis_results', Image, queue_size=1)
         self.is_pub = rospy.Publisher('/assembly/zivid/furniture_part/is_results', InstanceSegmentation2D, queue_size=1)
+        self.imdepth_pub = rospy.Publisher('/zivid_camera/depth/image_impainted', Image, queue_size=1)
 
 
         self.initialize_model()
@@ -54,10 +55,7 @@ class PartSegmenter:
                             std=[0.229, 0.224, 0.225]),
                             ])
         self.bridge = cv_bridge.CvBridge()
-
-        self.depth_val_min = 0.4
-        self.depth_val_max = 2.25
-        self.class_names = ["background", "left_side", "right_side", "middle", "long", "short", "bottom"]
+        self.class_names = ["background", "side", "short", "middle", "bottom", "long"]
 
         rgb_sub = message_filters.Subscriber("/zivid_camera/color/image_color", Image)
         depth_sub = message_filters.Subscriber("/zivid_camera/depth/image_raw", Image)
@@ -69,14 +67,14 @@ class PartSegmenter:
     def initialize_model(self):
 
         # import maskrcnn from pytorch module        
-        sys.path.append(self.seg_params["pytorch_module_path"])
+        sys.path.append(self.params["pytorch_module_path"])
         from models import maskrcnn
         # load config files
-        with open(os.path.join(self.seg_params["pytorch_module_path"], 'config', self.seg_params["config_file"])) as config_file:
+        with open(os.path.join(self.params["pytorch_module_path"], 'config', self.params["config_file"])) as config_file:
             config = json.load(config_file)
         # build model
-        self.model = maskrcnn.get_model_instance_segmentation(num_classes=7, config=config)
-        self.model.load_state_dict(torch.load(self.seg_params["weight_path"]))
+        self.model = maskrcnn.get_model_instance_segmentation(num_classes=self.params["num_classes"], config=config)
+        self.model.load_state_dict(torch.load(self.params["weight_path"]))
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
         self.model.eval()
@@ -86,7 +84,7 @@ class PartSegmenter:
         rgb_save = cv2.cvtColor(rgb_save, cv2.COLOR_BGR2RGB)
         rgb_save = PIL.Image.fromarray(np.uint8(rgb_save), mode="RGB")
         depth_save = self.bridge.imgmsg_to_cv2(depth)
-        save_dir = "/home/demo/catkin_ws/src/assembly_part_recognition/inference_data_zivid"
+        save_dir = "/home/demo/catkin_ws/src/assembly_part_recognition/inference_data_zivid_white_2"
         if not os.path.isdir(save_dir): os.makedirs(save_dir)
         save_name = "{}".format(time.time())
 
@@ -103,49 +101,37 @@ class PartSegmenter:
         rospy.loginfo_once("Segmenting furniture_part area")
         rgb = self.bridge.imgmsg_to_cv2(rgb, desired_encoding='bgr8')
         rgb = PIL.Image.fromarray(np.uint8(rgb), mode="RGB")
-        rgb_img = rgb.resize((self.seg_params["width"], self.seg_params["height"]), PIL.Image.BICUBIC)
+        rgb_img = rgb.resize((self.params["width"], self.params["height"]), PIL.Image.BICUBIC)
         rgb = self.rgb_transform(rgb_img)
 
         # load config files
-        with open(os.path.join(self.seg_params["pytorch_module_path"], 'config', self.seg_params["config_file"])) as config_file:
+        with open(os.path.join(self.params["pytorch_module_path"], 'config', self.params["config_file"])) as config_file:
             config = json.load(config_file)
         
         if config["depth_type"] != "None":
-            # original code
-            # depth = self.bridge.imgmsg_to_cv2(depth)
-            # depth = np.expand_dims(np.asarray(depth), -1)
-            # depth = np.repeat(depth, 3, -1)
-            # depth = cv2.resize(depth, dsize=(self.seg_params["width"], self.seg_params["height"]), interpolation=cv2.INTER_AREA)
-            # depth = torch.from_numpy(np.float32(depth))
-            # depth = depth.transpose(0, 2).transpose(1, 2)
 
             depth = self.bridge.imgmsg_to_cv2(depth)
-            depth = cv2.resize(depth, dsize=(self.seg_params["width"], self.seg_params["height"]), interpolation=cv2.INTER_AREA)
+            depth = cv2.resize(depth, dsize=(self.params["width"], self.params["height"]), interpolation=cv2.INTER_AREA)
             mask = np.isnan(depth.copy()).astype('uint8')
             depth = np.where(np.isnan(depth), 0, depth)           
 
             values = np.unique(depth)
-            max_val = max(values)
-            min_val = min(values)
-            depth = np.uint8((depth - min_val) / (max_val - min_val) * 255)
-            inpainted = cv2.inpaint(depth, mask, 3, cv2.INPAINT_NS)
+            min_depth = self.params["min_depth"]
+            max_depth = self.params["max_depth"]
+            depth = np.uint8((depth - min_depth) / (max_depth - min_depth) * 255) # normalize 
+            depth = cv2.inpaint(depth, mask, 3, cv2.INPAINT_NS)
+            self.imdepth_pub.publish(self.bridge.cv2_to_imgmsg(depth))
 
             depth = np.expand_dims(np.asarray(depth), -1)
             depth = np.repeat(depth, 3, -1)
             depth = torch.from_numpy(np.float32(depth))
             depth = depth.transpose(0, 2).transpose(1, 2)
-
-            depth = torch.clamp(depth, min=self.depth_val_min, max=self.depth_val_max)
-            depth = (depth-self.depth_val_min) / (self.depth_val_max-self.depth_val_min) # 3500-8000 to 0-1
+            depth = depth/255 # 0~255 to 0~1
 
             # create corresponding mask
             val_mask = torch.ones([depth.shape[1], depth.shape[2]])
             val_mask[np.where(depth[0] == 0.0)] = 0
             val_mask = val_mask.unsqueeze(0)
-
-            # depth, val_mask = self.RandomErasing(depth, val_mask)
-            # depth, val_mask = self.SaltPepperNoise(depth, val_mask)
-            # print(depth)
 
             input_tensor = torch.cat([rgb, depth, val_mask], dim=0)
             input_tensor = input_tensor.unsqueeze(0)
@@ -185,13 +171,14 @@ class PartSegmenter:
             is_msg.scores.append(score)
 
             mask = Image()
+
             mask.header = is_msg.header
-            mask.height = pred_masks[i].shape[0]
-            mask.width = pred_masks[i].shape[1]
+            mask.height = pred_masks[i].shape[1]
+            mask.width = pred_masks[i].shape[2]
             mask.encoding = "mono8"
             mask.is_bigendian = False
             mask.step = mask.width
-            mask.data = (pred_masks[i][0] * 255).tobytes()
+            mask.data = (np.uint8(pred_masks[i][0] * 255)).tobytes()
             is_msg.masks.append(mask)        
 
         self.is_pub.publish(is_msg)
@@ -216,7 +203,7 @@ class PartSegmenter:
                 stacked_img = np.stack((r, g, b), axis=0)
                 stacked_img = stacked_img.transpose(1, 2, 0)
 
-                rgb_img = cv2.addWeighted(rgb_img, 1, stacked_img.astype(np.uint8), 0.5, 0)
+                rgb_img = cv2.addWeighted(rgb_img, 1, stacked_img.astype(np.uint8), 1, 0)
                 cv2.rectangle(rgb_img, (boxes[i][0], boxes[i][1]), (boxes[i][2], boxes[i][3]), (0, 255, 0), 1)
                 cv2.putText(rgb_img, self.class_names[labels[i]] + str(score[i].item())[:4], \
                     (boxes[i][0], boxes[i][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255 ,0), 1)

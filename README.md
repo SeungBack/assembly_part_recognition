@@ -35,13 +35,17 @@ roslaunch assembly_part_recognition azure_scene.launch
 
 ### Zivid
 ```
-roscore
-ROS_NAMESPACE=zivid_camera rosrun zivid_camera zivid_camera_node
+roslaunch assembly_camera_manager zivid_manager.launch
+rosservice call /zivid_camera/extrinsic_calibration
 python ~/catkin_ws/src/assembly_camera_manager/scripts/receive_zivid_repeat.py
+
 roslaunch assembly_part_recognition zivid_connector.launch
 roslaunch assembly_part_recognition zivid_funiture_part.launch
 roslaunch assembly_part_recognition zivid_scene.launch
+roslaunch assembly_part_recognition zivid_hole.launch
 roslaunch assembly_part_recognition 6d_pose_estimator.launch
+
+rqt_image_view
 ```
 
 
@@ -56,3 +60,16 @@ This project is licensed under the MIT License
 ## Acknowledgments
 
 This work was supported by Institute for Information & Communications Technology Promotion(IITP) grant funded by Korea goverment(MSIT) (No.2019-0-01335, Development of AI technology to generate and validate the task plan for assembling furniture in the real and virtual environment by understanding the unstructured multi-modal information from the assembly manual.
+
+---
+
+## Problem: point cloud alignment
+```
+definition: we have obj2cam transformation matrix T, target mesh M, and captured mesh C. We expected that T*C=M, however is not
+```
+possible walkthroughs:
+* (x) simple inverse matrix problem
+* (ongoing) Mismatching coordinate problem 
+    opengl: -z as forward, but real: z as forward
+* () obj -> K -> world?
+* () rendering code?
