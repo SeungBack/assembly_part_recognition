@@ -52,41 +52,10 @@ class PoseEstimator:
         is_sub = message_filters.Subscriber("/assembly/zivid/furniture_part/is_results", InstanceSegmentation2D)
         caminfo_sub = message_filters.Subscriber("/zivid_camera/color/camera_info", CameraInfo)
 
-        # self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub, is_sub], queue_size=5, slop=3)
         self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub, is_sub, caminfo_sub], queue_size=5, slop=3)
         rospy.loginfo("Starting zivid rgb-d subscriber with time synchronizer")
         # from rgb-depth images, inference the results and publish it
-        # self.ts.registerCallback(self.inference)
         self.ts.registerCallback(self.inference_aae_pose)
-
-    # def initialize_model(self):
-
-    #     # import augmented autoencoder module        
-    #     sys.path.append(self.params["augauto_module_path"])
-    #     os.environ["CUDA_VISIBLE_DEVICES"] = self.params["gpu_id"]
-    #     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
-    #     from auto_pose.ae import factory
-    #     from auto_pose.ae import utils as u
-
-    #     full_name = self.params["exp_group"].split('/')
-    #     experiment_name = full_name.pop()
-    #     experiment_group = full_name.pop() if len(full_name) > 0 else ''
-    #     self.codebook, self.dataset = factory.build_codebook_from_name(experiment_name, experiment_group, return_dataset=True)
-
-    #     workspace_path = os.environ.get('AE_WORKSPACE_PATH')
-    #     log_dir = u.get_log_dir(workspace_path,experiment_name, experiment_group)
-    #     ckpt_dir = u.get_checkpoint_dir(log_dir)
-
-    #     train_cfg_file_path = u.get_train_config_exp_file_path(log_dir, experiment_name)
-    #     train_args = configparser.ConfigParser()
-    #     train_args.read(train_cfg_file_path)  
-
-    #     gpu_options = tf.GPUOptions(allow_growth=True, per_process_gpu_memory_fraction = 0.9)
-    #     config = tf.ConfigProto(gpu_options=gpu_options)
-    #     config.gpu_options.allow_growth = True
-
-    #     self.session = tf.Session(config=config) 
-    #     factory.restore_checkpoint(self.session, tf.train.Saver(), ckpt_dir)
 
     def initialize_model(self):
 
@@ -107,7 +76,6 @@ class PoseEstimator:
         test_configpath = os.path.join(self.workspace_path,'cfg_eval', self.params["test_config"])
         test_args = configparser.ConfigParser()
         test_args.read(test_configpath)
-
         self.ae_pose_est = AePoseEstimator(test_configpath)
 
     def inference_aae_pose(self, rgb, depth, is_results, caminfo):
@@ -123,20 +91,9 @@ class PoseEstimator:
 
         K = np.array(caminfo.K).reshape([3, 3])
 
-        # mask = np.where(depth==0, 1, 0).astype('uint8')
-        # values = np.unique(depth)
-        # max_val = max(values) 
-        # min_val = min(values)
-        # depth = np.uint8((depth - min_val) / (max_val - min_val) * 255)
-        # depth = cv2.inpaint(depth, mask, 3, cv2.INPAINT_NS)
-    
-        # cv2.imwrite("/home/demo/depth.png", depth)
-        # depth = self.bridge.imgmsg_to_cv2(depth)
-        # depth = cv2.resize(depth, dsize=(self.params["width"], self.params["height"]), interpolation=cv2.INTER_AREA)
-
+        boxes, scores, labels = [], [], []
         for i, class_id in enumerate(is_results.class_ids):
-            boxes, scores, labels = [], [], []
-            if class_id == self.params["class_id"] and is_results.scores[i] >= self.params["is_thresh"]:
+            if is_results.scores[i] >= self.params["is_thresh"]:
                 # crop the object area with offset
                 x = is_results.boxes[i].x_offset
                 y = is_results.boxes[i].y_offset
@@ -149,6 +106,13 @@ class PoseEstimator:
                 x2 = min(self.params["width"]-1, x+w+w_offset)
                 y2 = min(self.params["height"]-1, y+h+h_offset)
                 rgb_crop = rgb[y1:y2, x1:x2].copy()
+                if self.params["padding"]:
+                    pad = abs(((y2-y1)-(x2-x1))//2)
+                    if h >= w:
+                        rgb_crop = cv2.copyMakeBorder(rgb_crop, 0, 0, pad, pad, borderType=cv2.BORDER_CONSTANT, value=0)
+                    else:
+                        rgb_crop = cv2.copyMakeBorder(rgb_crop, pad, pad, 0, 0, borderType=cv2.BORDER_CONSTANT, value=0)
+                    cv2.imwrite("/home/demo/rgb_crop.png", rgb_crop)
                 rgb_crop = cv2.resize(rgb_crop, (128, 128))
                 depth_crop = depth[y1:y2, x1:x2].copy()
                 depth_crop = cv2.resize(depth_crop, (128, 128))
@@ -156,43 +120,42 @@ class PoseEstimator:
 
                 boxes.append(np.array([x, y, w, h]))
                 scores.append(is_results.scores[i])
-                # labels.append(is_results.class_ids[i]-1)
-                labels.append(0)
+                labels.append(class_id-1)
 
-                all_pose_estimates, all_class_idcs = self.ae_pose_est.process_pose(boxes, labels, rgb, depth)
-                ply_model_paths = [str(train_args.get('Paths','MODEL_PATH')) for train_args in self.ae_pose_est.all_train_args]
-                
-                sys.path.append(self.params["augauto_module_path"] + "/auto_pose")
-                from auto_pose.ae.utils import get_dataset_path
-                from meshrenderer import meshrenderer_phong
-                renderer = meshrenderer_phong.Renderer(ply_model_paths, 
-                    samples=1, 
-                    vertex_tmp_store_folder=get_dataset_path(self.workspace_path),
-                    vertex_scale=float(1)) # float(1) for some models
+        all_pose_estimates, all_class_idcs = self.ae_pose_est.process_pose(boxes, labels, rgb, depth)
+        ply_model_paths = [str(train_args.get('Paths','MODEL_PATH')) for train_args in self.ae_pose_est.all_train_args]
+    
+        sys.path.append(self.params["augauto_module_path"] + "/auto_pose")
+        from auto_pose.ae.utils import get_dataset_path
+        from meshrenderer import meshrenderer_phong
+        renderer = meshrenderer_phong.Renderer(ply_model_paths, 
+            samples=1, 
+            vertex_tmp_store_folder=get_dataset_path(self.workspace_path),
+            vertex_scale=float(1)) # float(1) for some models
 
-                bgr, depth, _ = renderer.render_many(obj_ids = [clas_idx for clas_idx in all_class_idcs],
-                                    W = self.ae_pose_est._width,
-                                    H = self.ae_pose_est._height,
-                                    K = self.ae_pose_est._camK, 
-                                    Rs = [pose_est[:3,:3] for pose_est in all_pose_estimates],
-                                    ts = [pose_est[:3,3] for pose_est in all_pose_estimates],
-                                    near = 10,
-                                    far = 10000,
-                                    random_light=False,
-                                    phong={'ambient':0.4,'diffuse':0.8, 'specular':0.3})
-                bgr = cv2.resize(bgr, (self.ae_pose_est._width,self.ae_pose_est._height))
-                
-                g_y = np.zeros_like(bgr)
-                g_y[:,:,1]= bgr[:,:,1]    
-                im_bg = cv2.bitwise_and(rgb, rgb, mask=(g_y[:,:,1]==0).astype(np.uint8))                 
-                image_show = cv2.addWeighted(im_bg, 1, g_y, 1, 0)
+        bgr, depth, _ = renderer.render_many(obj_ids = [clas_idx for clas_idx in all_class_idcs],
+                            W = self.ae_pose_est._width,
+                            H = self.ae_pose_est._height,
+                            K = self.ae_pose_est._camK, 
+                            Rs = [pose_est[:3,:3] for pose_est in all_pose_estimates],
+                            ts = [pose_est[:3,3] for pose_est in all_pose_estimates],
+                            near = 10,
+                            far = 10000,
+                            random_light=False,
+                            phong={'ambient':0.4,'diffuse':0.8, 'specular':0.3})
+        bgr = cv2.resize(bgr, (self.ae_pose_est._width,self.ae_pose_est._height))
+        
+        g_y = np.zeros_like(bgr)
+        g_y[:,:,1]= bgr[:,:,1]    
+        im_bg = cv2.bitwise_and(rgb, rgb, mask=(g_y[:,:,1]==0).astype(np.uint8))                 
+        image_show = cv2.addWeighted(im_bg, 1, g_y, 1, 0)
 
-                for label,box,score in zip(labels,boxes,scores):
-                    box = box.astype(np.int32)
-                    xmin, ymin, xmax, ymax = box[0], box[1], box[0] + box[2], box[1] + box[3]
-                    cv2.putText(image_show, '%s : %1.3f' % (label,score), (xmin, ymax+20), cv2.FONT_ITALIC, .5, color_dict[int(label)], 2)
-                    cv2.rectangle(image_show, (xmin, ymin), (xmax, ymax), (255, 0, 0), 2)
-                self.vis_pub.publish(self.bridge.cv2_to_imgmsg(image_show, "bgr8"))          
+        for label,box,score in zip(labels,boxes,scores):
+            box = box.astype(np.int32)
+            xmin, ymin, xmax, ymax = box[0], box[1], box[0] + box[2], box[1] + box[3]
+            cv2.putText(image_show, '%s : %1.3f' % (label,score), (xmin, ymax+20), cv2.FONT_ITALIC, .5, color_dict[int(label)], 2)
+            cv2.rectangle(image_show, (xmin, ymin), (xmax, ymax), (255, 0, 0), 2)
+        self.vis_pub.publish(self.bridge.cv2_to_imgmsg(image_show, "bgr8"))          
 
 
                 # target_width = rgb_original.shape[1]
@@ -213,7 +176,6 @@ class PoseEstimator:
                     
                 #     list_points_local.append(tuple(p_local))
 
-                break # currently, detect only single object with the highest confidence per class 
 
         # cloud_zivid = o3d.geometry.PointCloud()
         # cloud_zivid.points = o3d.utility.Vector3dVector(list_points_local)

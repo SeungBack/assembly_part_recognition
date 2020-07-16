@@ -55,7 +55,7 @@ class PartSegmenter:
                             std=[0.229, 0.224, 0.225]),
                             ])
         self.bridge = cv_bridge.CvBridge()
-        self.class_names = ["background", "side", "short", "middle", "bottom", "long"]
+        self.class_names = ["background", "side", "short_long", "middle", "bottom"]
 
         rgb_sub = message_filters.Subscriber("/zivid_camera/color/image_color", Image)
         depth_sub = message_filters.Subscriber("/zivid_camera/depth/image_raw", Image)

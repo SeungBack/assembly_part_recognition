@@ -3,7 +3,7 @@ exp_group: "exp_group/Ikea_stefan_middle"
 test_config: "aae_maskrcnn_zivid.cfg"
 gpu_id: "1"
 width: 640
-height: 480
+height: 400
 is_thresh: 0.9
-class_id: 3
 crop_offset: 0.1
+padding: true

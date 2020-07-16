@@ -112,10 +112,10 @@ class HoleSegmenter:
         stacked_img = np.stack((r, g, b), axis=0) # 3, 1200, 1920
         stacked_img = stacked_img.transpose(1, 2, 0)
         hs_vis = cv2.addWeighted(rgb, 1, stacked_img.astype(np.uint8), 1, 0)
-        for h in range(rgb.shape[0]):
-            for w in range(rgb.shape[1]):
-                if pred[h][w] > 0:
-                    cv2.circle(hs_vis, (w,h), 15, [150, 0, 0], 1)
+        #for h in range(rgb.shape[0]):
+         #   for w in range(rgb.shape[1]):
+         #       if pred[h][w] > 0:
+          #          cv2.circle(hs_vis, (w,h), 15, [150, 0, 0], 1)
 
         self.hs_pub.publish(self.bridge.cv2_to_imgmsg(hs_vis, "bgr8"))
         
