@@ -30,7 +30,7 @@ class HoleSegmenter:
         rospy.loginfo("Starting zivid_hole_segmenter.py")
 
         self.params = rospy.get_param("zivid_hole")
-        self.hs_pub = rospy.Publisher('/assembly/zivid/hole/seg_results', Image, queue_size=2)
+        self.hs_pub = rospy.Publisher('/assembly/zivid/hole/seg_results', Image, queue_size=10)
 
         self.initialize_model()
         self.rgb_transform = transforms.Compose([
@@ -72,7 +72,6 @@ class HoleSegmenter:
         depth = np.where(np.isnan(depth), 0, depth)      
         depth = np.uint8((depth - self.params["min_depth"]) / (self.params["max_depth"] - self.params["min_depth"]) * 255)
 
-
         grid_height = rgb.shape[0]//self.params["grid_size"]
         grid_width = rgb.shape[1]//self.params["grid_size"]
 
@@ -104,19 +103,19 @@ class HoleSegmenter:
                     
 
         pred = np.uint8(pred*255)
-        color = np.array([100, 255, 100])
+        color = np.array([10, 255, 10])
         r = pred * color[0]
         g = pred * color[1] 
         b = pred * color[2]
 
         stacked_img = np.stack((r, g, b), axis=0) # 3, 1200, 1920
         stacked_img = stacked_img.transpose(1, 2, 0)
-        hs_vis = cv2.addWeighted(rgb, 1, stacked_img.astype(np.uint8), 1, 0)
+        hs_vis = cv2.addWeighted(rgb, 0.5, stacked_img.astype(np.uint8), 1, 0)
         #for h in range(rgb.shape[0]):
          #   for w in range(rgb.shape[1]):
          #       if pred[h][w] > 0:
           #          cv2.circle(hs_vis, (w,h), 15, [150, 0, 0], 1)
-
+        hs_vis = cv2.resize(hs_vis.copy(), dsize=(self.params["width"], self.params["height"]), interpolation=cv2.INTER_AREA )
         self.hs_pub.publish(self.bridge.cv2_to_imgmsg(hs_vis, "bgr8"))
         
 

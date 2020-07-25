@@ -11,7 +11,7 @@ import yaml
 import sys
 
 from std_msgs.msg import String
-from sensor_msgs.msg import RegionOfInterest, Image, CameraInfo
+from sensor_msgs.msg import RegionOfInterest, Image, CameraInfo, PointCloud2
 from assembly_part_recognition.msg import InstanceSegmentation2D
  
 import cv2
@@ -22,9 +22,12 @@ import os
 import configparser
 
 import pcl
+import pcl_ros
 
 import open3d as o3d
 import copy
+
+import open3d_helper
 
 color_dict = [(255,255,0),(0,0,255),(255,0,0),(255,255,0)] * 10
 
@@ -52,10 +55,15 @@ class PoseEstimator:
         is_sub = message_filters.Subscriber("/assembly/zivid/furniture_part/is_results", InstanceSegmentation2D)
         caminfo_sub = message_filters.Subscriber("/zivid_camera/color/camera_info", CameraInfo)
 
-        self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub, is_sub, caminfo_sub], queue_size=5, slop=3)
+        self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub, is_sub, caminfo_sub], queue_size=5, slop=5)
         rospy.loginfo("Starting zivid rgb-d subscriber with time synchronizer")
         # from rgb-depth images, inference the results and publish it
         self.ts.registerCallback(self.inference_aae_pose)
+
+
+        # cloud_sub = message_filters.Subscriber("/zivid_camera/points", PointCloud2)
+        # self.ts = message_filters.ApproximateTimeSynchronizer([cloud_sub], queue_size=5, slop=5)
+        # self.ts.registerCallback(self.test_cloud)
 
     def initialize_model(self):
 
@@ -77,24 +85,87 @@ class PoseEstimator:
         test_args = configparser.ConfigParser()
         test_args.read(test_configpath)
         self.ae_pose_est = AePoseEstimator(test_configpath)
+        self.ply_model_paths = [str(train_args.get('Paths','MODEL_PATH')) for train_args in self.ae_pose_est.all_train_args]
 
     def inference_aae_pose(self, rgb, depth, is_results, caminfo):
 
-        
+        # TODO: undistort rgb_original, depth_original
+
+        # get rgb, depth, is_results K, pointcloud
         rospy.loginfo_once("Estimating 6D pose of objects")
         rgb_original = self.bridge.imgmsg_to_cv2(rgb, desired_encoding='bgr8')
-        rgb = cv2.resize(rgb_original.copy(), (self.params["width"], self.params["height"]))
+        rgb_resized = cv2.resize(rgb_original.copy(), (self.params["width"], self.params["height"]))
 
         depth_original = self.bridge.imgmsg_to_cv2(depth)
-        depth = cv2.resize(depth_original.copy(), dsize=(self.params["width"], self.params["height"]), interpolation=cv2.INTER_AREA)
-        depth = np.where(np.isnan(depth), 0, depth)  
+        depth_resized = cv2.resize(depth_original.copy(), dsize=(self.params["width"], self.params["height"]), interpolation=cv2.INTER_AREA)
+        depth_resized = np.where(np.isnan(depth_resized), 0, depth_resized)  
 
         K = np.array(caminfo.K).reshape([3, 3])
 
+
+        # gather all detected crops
         boxes, scores, labels = [], [], []
+        boxes, scores, labels, is_mask = self.gather_is_results(rgb_resized, depth_resized, boxes, scores, labels, is_results)
+        is_mask_original = cv2.resize(is_mask, (rgb_original.shape[1], rgb_original.shape[0]), interpolation=cv2.INTER_AREA)
+
+        # 6D pose estimation for all detected crops
+        all_pose_estimates, all_class_idcs = self.ae_pose_est.process_pose(boxes, labels, rgb_resized, depth_resized)
+
+        # visualize pose estimation results
+        self.visualize_pose_estimation_results(all_pose_estimates, all_class_idcs, labels, boxes, scores, rgb_resized)
+
+        # cloud_zivid
+        list_points_local = []
+        list_colors_local = []
+        for idx_pixel in np.ndindex(is_mask_original.shape):
+            if is_mask_original[idx_pixel] < 128 or np.isnan(depth_original[idx_pixel]):
+                continue
+            # gather depth (x, y, z)
+            p_screen = np.array([idx_pixel[0], idx_pixel[1], depth_original[idx_pixel]], dtype=float)
+            p_local = np.matmul(np.linalg.inv(K), p_screen) 
+            list_points_local.append(tuple(p_local))
+
+            c_local = np.array([rgb_original[idx_pixel][0], rgb_original[idx_pixel][1], rgb_original[idx_pixel][2]]) / 255.0
+            list_colors_local.append(tuple(c_local))
+
+        cloud_zivid = o3d.geometry.PointCloud()
+        cloud_zivid.points = o3d.utility.Vector3dVector(list_points_local)
+        cloud_zivid.colors = o3d.utility.Vector3dVector(list_colors_local)
+        T_seg_to_center = np.eye(4)
+        T_seg_to_center[:3, 3] = -cloud_zivid.get_center()
+        cloud_zivid.transform(T_seg_to_center)
+        cloud_zivid.transform([[1000, 0, 0, 0], [0, 1000, 0, 0], [0, 0, 1000, 0], [0, 0, 0, 1]]) # rescale ply from mm to m
+
+        # 6D object pose refinement using ICP on pointcloud
+        for i, (pose_estimate, class_id) in enumerate(zip(all_pose_estimates, all_class_idcs)):
+
+            cloud_GT = o3d.io.read_point_cloud(self.ply_model_paths[class_id])     
+            # estimated rotation
+            T_rot = np.eye(4)
+            T_rot[:3, :3] = pose_estimate[:3, :3]
+            cloud_GT_rotated = copy.deepcopy(cloud_GT).transform(T_rot)
+
+            # OpenGL->Real
+            T_gl_to_zivid = np.eye(4)
+            flip_xy_plane = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])
+            rotate_z_90 = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]]) # -90 along Z
+            T_gl_to_zivid[:3, :3] = np.matmul(flip_xy_plane, T_gl_to_zivid[:3, :3])
+            T_gl_to_zivid[:3, :3] = np.matmul(rotate_z_90, T_gl_to_zivid[:3, :3])
+
+            flip = np.array([[0, 0, 1, 0], [-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float) # ok
+            rot_y_90 = np.array([[0, 0, 1, 0], [0, 1, 0, 0], [-1, 0, 0, 0], [0, 0, 0, 1]], dtype=np.float)
+            flip = np.matmul(rot_y_90, flip)
+
+            cloud_GT_to_zivid = copy.deepcopy(cloud_GT_rotated).transform(flip)
+            o3d.visualization.draw_geometries([
+                cloud_zivid, 
+                cloud_GT_to_zivid, 
+            ])
+
+    def gather_is_results(self, rgb, depth, boxes, scores, labels, is_results):
+
         for i, class_id in enumerate(is_results.class_ids):
             if is_results.scores[i] >= self.params["is_thresh"]:
-                # crop the object area with offset
                 x = is_results.boxes[i].x_offset
                 y = is_results.boxes[i].y_offset
                 h = is_results.boxes[i].height
@@ -121,14 +192,16 @@ class PoseEstimator:
                 boxes.append(np.array([x, y, w, h]))
                 scores.append(is_results.scores[i])
                 labels.append(class_id-1)
+        return boxes, scores, labels, is_mask
 
-        all_pose_estimates, all_class_idcs = self.ae_pose_est.process_pose(boxes, labels, rgb, depth)
-        ply_model_paths = [str(train_args.get('Paths','MODEL_PATH')) for train_args in self.ae_pose_est.all_train_args]
-    
+
+    def visualize_pose_estimation_results(self, all_pose_estimates, all_class_idcs, labels, boxes, scores, rgb):
+
         sys.path.append(self.params["augauto_module_path"] + "/auto_pose")
         from auto_pose.ae.utils import get_dataset_path
         from meshrenderer import meshrenderer_phong
-        renderer = meshrenderer_phong.Renderer(ply_model_paths, 
+
+        renderer = meshrenderer_phong.Renderer(self.ply_model_paths, 
             samples=1, 
             vertex_tmp_store_folder=get_dataset_path(self.workspace_path),
             vertex_scale=float(1)) # float(1) for some models
@@ -143,197 +216,20 @@ class PoseEstimator:
                             far = 10000,
                             random_light=False,
                             phong={'ambient':0.4,'diffuse':0.8, 'specular':0.3})
-        bgr = cv2.resize(bgr, (self.ae_pose_est._width,self.ae_pose_est._height))
+        bgr = cv2.resize(bgr, (self.ae_pose_est._width, self.ae_pose_est._height))
         
         g_y = np.zeros_like(bgr)
         g_y[:,:,1]= bgr[:,:,1]    
         im_bg = cv2.bitwise_and(rgb, rgb, mask=(g_y[:,:,1]==0).astype(np.uint8))                 
         image_show = cv2.addWeighted(im_bg, 1, g_y, 1, 0)
 
-        for label,box,score in zip(labels,boxes,scores):
+        for label, box, score in zip(labels, boxes, scores):
             box = box.astype(np.int32)
             xmin, ymin, xmax, ymax = box[0], box[1], box[0] + box[2], box[1] + box[3]
             cv2.putText(image_show, '%s : %1.3f' % (label,score), (xmin, ymax+20), cv2.FONT_ITALIC, .5, color_dict[int(label)], 2)
             cv2.rectangle(image_show, (xmin, ymin), (xmax, ymax), (255, 0, 0), 2)
         self.vis_pub.publish(self.bridge.cv2_to_imgmsg(image_show, "bgr8"))          
-
-
-                # target_width = rgb_original.shape[1]
-                # target_height = rgb_original.shape[0]
-                # target_dim = (target_width, target_height)
-                # is_mask_resized = cv2.resize(is_mask, target_dim, interpolation=cv2.INTER_AREA)
-                
-                # list_points_local = []
-                # for idx_pixel in np.ndindex(is_mask_resized.shape):
-                #     if is_mask_resized[idx_pixel] < 128 or np.isnan(depth_original[idx_pixel]):
-                #         continue
-
-                #     # gather depth (x, y, z)
-                #     p_screen = np.array([idx_pixel[0], idx_pixel[1], depth_original[idx_pixel]], dtype=float)
-                #     # print(p_screen)
-                #     p_local = np.matmul(np.linalg.inv(K), p_screen)
-                #     # print(p_local) # OK
-                    
-                #     list_points_local.append(tuple(p_local))
-
-
-        # cloud_zivid = o3d.geometry.PointCloud()
-        # cloud_zivid.points = o3d.utility.Vector3dVector(list_points_local)
-        # cloud_zivid.paint_uniform_color([1, 0.706, 0]) # yellow
-
-        # o3d.io.write_point_cloud("/home/demo/Downloads/cloud_zivid.ply", cloud_zivid)
-
-        # cloud_gt = o3d.io.read_point_cloud("/home/demo/Workspace/seung/AugmentedAutoencoder/3d_models/ply/Ikea_stefan_middle_cloud.ply")        
-        
-
-        # T = np.eye(4)
-        # T[:3, :3] = all_pose_estimates[0][:3, :3]
-        # T[:3, 3] = cloud_zivid.get_center()
-        # print("[DEBUG] cloud_zivid.get_center() = ", cloud_zivid.get_center())
-        # print("[DEBUG] T[:3, 3] = ", T[:3, 3])
-
-        # flip_xy_plane = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])
-        # rotate_z_90 = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]]) # -90 along Z
-        # T[:3, :3] = np.matmul(flip_xy_plane, T[:3, :3])
-        # T[:3, :3] = np.matmul(rotate_z_90, T[:3, :3])
-
-        # rospy.loginfo_once("T \n{}".format(T))
-        # cloud_zivid_transformed = copy.deepcopy(cloud_zivid).transform(T) # to origin
-        # cloud_zivid_transformed.paint_uniform_color([0.5, 0, 0]) # dark red 
-        # cloud_zivid_transformed2 = copy.deepcopy(cloud_zivid).transform(np.linalg.inv(T))
-        # cloud_zivid_transformed2.paint_uniform_color([0, 0.5, 0]) # dark green
-
-        # coordinate = o3d.geometry.TriangleMesh.create_coordinate_frame()
-
-        # o3d.visualization.draw_geometries([coordinate, cloud_gt, cloud_zivid_transformed, cloud_zivid_transformed2, cloud_zivid])
-
-
-
-    def inference_caminfo(self, rgb, depth, is_results, caminfo):
-
-        rospy.loginfo_once("Estimating 6D pose of objects")
-        rgb = self.bridge.imgmsg_to_cv2(rgb, desired_encoding='bgr8')
-        rgb_original = rgb.copy()
-        rgb = cv2.resize(rgb, (self.params["width"], self.params["height"]))
-        
-
-        for i, class_id in enumerate(is_results.class_ids):
-            if class_id == self.params["class_id"] and is_results.scores[i] >= self.params["is_thresh"]:
-                # crop the object area with offset
-                x = is_results.boxes[i].x_offset
-                y = is_results.boxes[i].y_offset
-                h = is_results.boxes[i].height
-                w = is_results.boxes[i].width
-                h_offset = int(h*self.params["crop_offset"])
-                w_offset = int(w*self.params["crop_offset"])
-                new_x1 = max(0, x-w_offset)
-                new_y1 = max(0, y-h_offset)
-                new_x2 = min(self.params["width"]-1, x+w+w_offset)
-                new_y2 = min(self.params["height"]-1, y+h+h_offset)
-                rgb_crop = rgb[new_y1:new_y2, new_x1:new_x2].copy()
-                rgb_crop = cv2.resize(rgb_crop, (128, 128))
-                # get translation
-                # median filter on segmented region
-
-                depth = self.bridge.imgmsg_to_cv2(depth)
-                depth_original = depth.copy()
-                depth = cv2.resize(depth, dsize=(self.params["width"], self.params["height"]), interpolation=cv2.INTER_AREA)
-                mask = np.isnan(depth.copy()).astype('uint8')
-                depth = np.where(np.isnan(depth), 0, depth)
-                is_mask = self.bridge.imgmsg_to_cv2(is_results.masks[i])
-
-                # DEBUG: plot depth
-                # print(depth.shape)
-                # for idx_pixel in np.ndindex(depth.shape):
-                #     print("[DEBUG] depth #", idx_pixel, " = ", depth[idx_pixel]) # OK
-
-                # DEBUG: visualize mask
-                # print(is_mask.shape)
-                # cv2.imshow("mask", is_mask)
-                # cv2.waitKey(0) # OK
-                
-                # Resize mask image & color & depth to original resolution
-                target_width = rgb_original.shape[1]
-                target_height = rgb_original.shape[0]
-                target_dim = (target_width, target_height)
-                is_mask_resized = cv2.resize(is_mask, target_dim, interpolation=cv2.INTER_AREA)
-                # print(is_mask_resized.shape)
-                # cv2.imshow("mask_resized", is_mask_resized)
-                # cv2.imshow("rgb_original", rgb_original)
-                # cv2.waitKey(0) # OK
-
-                # Calibration matrix
-                K = np.array(caminfo.K).reshape([3, 3])
-                # print(K)
-
-                # Iterate color image over mask index
-                list_points_local = []
-                for idx_pixel in np.ndindex(is_mask_resized.shape):
-                    if is_mask_resized[idx_pixel] < 128 or np.isnan(depth_original[idx_pixel]):
-                        continue
-
-                    # gather depth (x, y, z)
-                    p_screen = np.array([idx_pixel[0], idx_pixel[1], depth_original[idx_pixel]], dtype=float)
-                    # print(p_screen)
-                    p_local = np.matmul(np.linalg.inv(K), p_screen)
-                    # print(p_local) # OK
-                    
-                    list_points_local.append(tuple(p_local))
-                    
- 
-                # Median values
-                t = np.mean(np.array(list_points_local), axis = 0)
-
-                # bbox center
-                bbox_min = np.matmul(np.linalg.inv(K), np.array([x, y, depth_original[x, y]]))
-                bbox_max = np.matmul(np.linalg.inv(K), np.array([x+w, y+h ,depth_original[x+w, y+h]]))
-                print(bbox_min, bbox_max)
-                t = (bbox_min + bbox_max) / 2.0 
-                
-                
-                print("centroid = ", t)
-
-                break # currently, detect only single object with the highest confidence per class 
-        # get rotation
-        R = self.codebook.nearest_rotation(self.session, rgb_crop)
-        pred_view = self.dataset.render_rot(R, downSample = 1)
-        print(R)
-
-        # cloud_gt = o3d.io.read_point_cloud("/home/demo/catkin_ws/src/assembly_point_cloud_manager/sample/pcd/stefan_middle.pcd")
-        cloud_gt = o3d.io.read_point_cloud("/home/demo/Workspace/seung/AugmentedAutoencoder/3d_models/ply/Ikea_stefan_middle_cloud.ply")
-        # cloud_gt.scale(1e-3, center=cloud_gt.get_center())
-        cloud_zivid = o3d.geometry.PointCloud()
-        # print(np.array(list_points_local).shape) # OK
-        cloud_zivid.points = o3d.utility.Vector3dVector(list_points_local)
-        cloud_zivid.paint_uniform_color([1, 0.706, 0])
-
-        # Transformation
-
-        T = np.eye(4)
-        T[:3, :3] = R # T->R->S
-        T[:3, 3] = cloud_zivid.get_center()
-        cloud_zivid_transformed = copy.deepcopy(cloud_gt).transform(T) # to origin
-        cloud_zivid_transformed.paint_uniform_color([0.5, 0, 0])
-
-
-        T = np.eye(4)
-        T[2, 2] =  -1
-        cloud_zivid_transformed2 = copy.deepcopy(cloud_zivid_transformed).transform(T)
-        cloud_zivid_transformed2.paint_uniform_color([0, 0.5, 0])
-
-
-        # cloud_zivid_transformed3 = copy.deepcopy(cloud_zivid_transformed).transform(T)
-        # cloud_zivid_transformed3.paint_uniform_color([0, 0, 0.5])
-
-        
-        vis_results = np.hstack([rgb_crop, pred_view])
-        self.vis_pub.publish(self.bridge.cv2_to_imgmsg(vis_results, "bgr8"))
-
-        o3d.visualization.draw_geometries([cloud_gt, cloud_zivid, cloud_zivid_transformed, cloud_zivid_transformed2])
-
-
-
-
+    
 if __name__ == '__main__':
 
     pose_estimator = PoseEstimator()

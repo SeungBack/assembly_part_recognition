@@ -59,7 +59,7 @@ class PartSegmenter:
 
         rgb_sub = message_filters.Subscriber("/zivid_camera/color/image_color", Image)
         depth_sub = message_filters.Subscriber("/zivid_camera/depth/image_raw", Image)
-        self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size=5, slop=0.1)
+        self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size=5, slop=1)
         rospy.loginfo("Starting zivid rgb-d subscriber with time synchronizer")
         # from rgb-depth images, inference the results and publish it
         self.ts.registerCallback(self.inference)
@@ -120,7 +120,8 @@ class PartSegmenter:
             max_depth = self.params["max_depth"]
             depth = np.uint8((depth - min_depth) / (max_depth - min_depth) * 255) # normalize 
             depth = cv2.inpaint(depth, mask, 3, cv2.INPAINT_NS)
-            self.imdepth_pub.publish(self.bridge.cv2_to_imgmsg(depth))
+            depth_vis = cv2.resize(depth.copy(), dsize=(self.params["width"], self.params["height"]), interpolation=cv2.INTER_AREA )
+            self.imdepth_pub.publish(self.bridge.cv2_to_imgmsg(depth_vis))
 
             depth = np.expand_dims(np.asarray(depth), -1)
             depth = np.repeat(depth, 3, -1)

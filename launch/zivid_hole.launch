@@ -1,4 +1,4 @@
 <launch>
   <rosparam command="load" file="$(find assembly_part_recognition)/param/zivid_hole.yaml" ns="zivid_hole" />
-  <node name="zivid_furniture_part_segmenter" pkg="assembly_part_recognition" type="zivid_hole_segmenter.py" output="screen"/>
+  <node name="zivid_hole_segmenter" pkg="assembly_part_recognition" type="zivid_hole_segmenter.py" output="screen"/>
 </launch>

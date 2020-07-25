@@ -35,15 +35,21 @@ roslaunch assembly_part_recognition azure_scene.launch
 
 ### Zivid
 ```
+# camera
 roslaunch assembly_camera_manager zivid_manager.launch
-rosservice call /zivid_camera/extrinsic_calibration
 python ~/catkin_ws/src/assembly_camera_manager/scripts/receive_zivid_repeat.py
 
-roslaunch assembly_part_recognition zivid_connector.launch
+# pose estimation
 roslaunch assembly_part_recognition zivid_funiture_part.launch
+roslaunch assembly_part_recognition 6d_pose_estimator.launch
+
+# segmentation
+roslaunch assembly_part_recognition zivid_connector.launch
 roslaunch assembly_part_recognition zivid_scene.launch
 roslaunch assembly_part_recognition zivid_hole.launch
-roslaunch assembly_part_recognition 6d_pose_estimator.launch
+
+rosservice call /zivid_camera/extrinsic_calibration
+
 
 rqt_image_view
 ```
