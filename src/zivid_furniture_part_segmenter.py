@@ -57,8 +57,8 @@ class PartSegmenter:
         self.bridge = cv_bridge.CvBridge()
         self.class_names = ["background", "side", "short_long", "middle", "bottom"]
 
-        rgb_sub = message_filters.Subscriber("/zivid_camera/color/image_color", Image)
-        depth_sub = message_filters.Subscriber("/zivid_camera/depth/image_raw", Image)
+        rgb_sub = message_filters.Subscriber("/zivid_camera/color_rect/image_color", Image)
+        depth_sub = message_filters.Subscriber("/zivid_camera/depth_rect/image_raw", Image)
         self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size=5, slop=1)
         rospy.loginfo("Starting zivid rgb-d subscriber with time synchronizer")
         # from rgb-depth images, inference the results and publish it

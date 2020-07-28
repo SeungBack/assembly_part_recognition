@@ -48,15 +48,19 @@ def convertCloudFromOpen3dToRos(open3d_cloud, frame_id="odom"):
     # create ros_cloud
     return pc2.create_cloud(header, fields, cloud_data)
 
-def convertCloudFromRosToOpen3d(ros_cloud, skip_nans=True):
+def convertZividCloudFromRosToOpen3d(ros_cloud, skip_nans=True):
     
     # Get cloud data from ros_cloud
     field_names= [field.name for field in ros_cloud.fields]
     
     cloud_data = []
-    for data in pc2.read_points(ros_cloud, skip_nans=skip_nans, field_names = field_names):
+    valid_im2pc_idx = np.zeros(1920*1200)
+    n_points = 0
+    for i, data in enumerate(pc2.read_points(ros_cloud, skip_nans=skip_nans, field_names=field_names)):
         if not np.isnan(data[3]):
-            cloud_data.append([data[0], data[1], data[2], data[3]])
+            cloud_data.append(data)
+            valid_im2pc_idx[i] = int(n_points)
+            n_points += 1
 
 
     # Check empty
@@ -70,13 +74,13 @@ def convertCloudFromRosToOpen3d(ros_cloud, skip_nans=True):
         IDX_RGB_IN_FIELD = 3 # x, y, z, rgb
         
         # Get xyz
-        xyz = [(x,y,z) for x,y,z,rgb in cloud_data] # (why cannot put this line below rgb?)
+        xyz = [(x,y,z) for x,y,z,c,rgb in cloud_data] # (why cannot put this line below rgb?)
         # Get rgb
         # Check whether int or float
         if type(cloud_data[0][IDX_RGB_IN_FIELD])==float: # if float (from pcl::toROSMsg)
-            rgb = [convert_rgbFloat_to_tuple(rgb) for x,y,z,rgb in cloud_data ]
+            rgb = [convert_rgbFloat_to_tuple(rgb) for x,y,z,c,rgb in cloud_data ]
         else:
-            rgb = [convert_rgbUint32_to_tuple(rgb) for x,y,z,rgb in cloud_data ]
+            rgb = [convert_rgbUint32_to_tuple(rgb) for x,y,z,c,rgb in cloud_data ]
 
         # combine
         open3d_cloud.points = open3d.utility.Vector3dVector(np.array(xyz))
@@ -85,4 +89,4 @@ def convertCloudFromRosToOpen3d(ros_cloud, skip_nans=True):
         xyz = [(x,y,z) for x,y,z in cloud_data] # get xyz
         open3d_cloud.points = open3d.utility.Vector3dVector(np.array(xyz))
 
-    return open3d_cloud
+    return open3d_cloud, valid_im2pc_idx

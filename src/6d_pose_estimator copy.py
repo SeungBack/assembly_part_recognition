@@ -115,7 +115,37 @@ class PoseEstimator:
         # visualize pose estimation results
         self.visualize_pose_estimation_results(all_pose_estimates, all_class_idcs, labels, boxes, scores, rgb_resized)
 
-        # crop zivid cloud with instance mask        
+        # cloud_zivid
+        list_points_local = []
+        list_colors_local = []
+        camera_info_K = np.array(camera_info.K).reshape([3, 3])
+        camera_info_D = np.array(camera_info.D)
+
+        # newcamera, roi = cv2.getOptimalNewCameraMatrix(camera_info_K, camera_info_D, (rgb_original.shape[1], rgb_original.shape[0]), 0)
+        # print(roi)
+        # rgb_undist = cv2.undistort(rgb_original, camera_info_K, camera_info_D, None, newcamera)
+        # depth_undist = cv2.undistort(depth_original, camera_info_K, camera_info_D, None, newcamera)
+        # cv2.imwrite("/home/demo/rgb.png", rgb_undist)
+        # cv2.imwrite("/home/demo/depth.png", depth_undist)
+
+        # for idx_pixel in np.ndindex(is_mask_original.shape):
+        #     if is_mask_original[idx_pixel] < 128 or np.isnan(depth_original[idx_pixel]):
+        #         continue
+        #     # gather depth (x, y, z)
+        #     x_corrected = idx_pixel[0]
+        #     y_corrected = idx_pixel[1]
+
+        #     p_screen = np.array([idx_pixel[0], idx_pixel[1], depth_original[idx_pixel]], dtype=float)
+        #     p_local = np.matmul(np.linalg.inv(camera_info_K), p_screen)
+        #     list_points_local.append(tuple(p_local))
+        #     c_local = np.array([rgb_original[idx_pixel][0], rgb_original[idx_pixel][1], rgb_original[idx_pixel][2]]) / 255.0
+        #     list_colors_local.append(tuple(c_local))
+
+        # get point clouds corresponding to the mask image
+        # cloud_zivid = o3d.geometry.PointCloud()
+        # cloud_zivid.points = o3d.utility.Vector3dVector(list_points_local)
+        # cloud_zivid.colors = o3d.utility.Vector3dVector(list_colors_local)
+        
         pc_idxes = []
         for idx_pixel in np.ndindex(is_mask_original.shape):
             if is_mask_original[idx_pixel] < 128 or np.isnan(depth_original[idx_pixel]):
@@ -129,9 +159,12 @@ class PoseEstimator:
         cloud_target.points = o3d.utility.Vector3dVector(zivid_points[pc_idxes])
         cloud_target.colors = o3d.utility.Vector3dVector(zivid_colors[pc_idxes])
 
-        # translate target_cloud to center
+        print(cloud_target.get_max_bound())
+
+
         T_seg_to_center = np.eye(4)
         T_seg_to_center[:3, 3] = -cloud_target.get_center()
+        print("[DEBUG] T_seg_to_center = ", cloud_target.get_center())
         cloud_target.transform(T_seg_to_center)
         cloud_target.transform([[1000, 0, 0, 0], [0, 1000, 0, 0], [0, 0, 1000, 0], [0, 0, 0, 1]]) # rescale ply from mm to m
 
@@ -144,11 +177,54 @@ class PoseEstimator:
             T_rot[:3, :3] = pose_estimate[:3, :3]
             cloud_GT_rotated = copy.deepcopy(cloud_GT).transform(T_rot)
 
+            # OpenGL->Real
+            # T_gl_to_zivid = np.eye(4)
+            # flip_xy_plane = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])
+            # rotate_z_90 = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]]) # -90 along Z
+            # T_gl_to_zivid[:3, :3] = np.matmul(flip_xy_plane, T_gl_to_zivid[:3, :3])
+            # T_gl_to_zivid[:3, :3] = np.matmul(rotate_z_90, T_gl_to_zivid[:3, :3])
+
+            # TODO: rotate X: pi/2
+            flip = np.array([[0, 0, 1, 0], [-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float) # ok
+            rot_y_90 = np.array([[0, 0, 1, 0], [0, 1, 0, 0], [-1, 0, 0, 0], [0, 0, 0, 1]], dtype=np.float)
+            flip = np.matmul(rot_y_90, flip)
+            cloud_GT_to_zivid = copy.deepcopy(cloud_GT_rotated).transform(flip)
+            
+            # TODO: ICP; src = cloud_GT_to_zivid, dst = cloud_zivid
+            
+            # amount_target_subsamples = min(np.asarray(cloud_zivid.points).shape[0], np.asarray(cloud_GT_to_zivid.points).shape[0])
+            
+            # print(amount_target_subsamples)
+            
+            # cloud_zivid.estimate_normals(
+            #     o3d.geometry.KDTreeSearchParamHybrid(radius=0.3, max_nn=30)
+            # )
+            # cloud_GT_to_zivid.estimate_normals(
+            #     o3d.geometry.KDTreeSearchParamHybrid(radius=0.3, max_nn=30)
+            # )
+
+            # result_icp = o3d.registration.registration_icp(
+            #     source = cloud_zivid, target = cloud_GT_to_zivid, max_correspondence_distance = 0.2, 
+            #         init = np.eye(4),  
+            #     estimation_method = o3d.registration.TransformationEstimationPointToPlane(), 
+            #     criteria = o3d.registration.ICPConvergenceCriteria(relative_fitness=1e-6,
+            #                                         relative_rmse=1e-6,
+            #                                         max_iteration=500)
+
+            # )
+            # print("[DEBUG] result_icp.transformation = ")
+            # print(result_icp.transformation)
+
+
+            # cloud_GT_to_zivid.transform(result_icp.transformation)
             # TODO: ICP Done
+
+
 
             o3d.visualization.draw_geometries([
                 cloud_target, 
                 cloud_GT_rotated,
+                cloud_GT_to_zivid, 
             ])
 
 
