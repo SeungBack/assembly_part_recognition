@@ -13,7 +13,8 @@ import sys
 from std_msgs.msg import String
 from sensor_msgs.msg import RegionOfInterest, Image, CameraInfo, PointCloud2
 from assembly_part_recognition.msg import InstanceSegmentation2D
- 
+from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
+
 import cv2
 import argparse
 import tensorflow as tf
@@ -48,8 +49,8 @@ class PoseEstimator:
         self.initialize_model()
         self.bridge = cv_bridge.CvBridge()
         # subscribers
-        rgb_sub = message_filters.Subscriber("/zivid_camera/color_rect/image_color", Image)
-        depth_sub = message_filters.Subscriber("/zivid_camera/depth_rect/image_raw", Image)
+        rgb_sub = message_filters.Subscriber("/zivid_camera/color/image_color", Image)
+        depth_sub = message_filters.Subscriber("/zivid_camera/depth/image_raw", Image)
         point_sub = message_filters.Subscriber("/zivid_camera/points", PointCloud2)
         is_sub = message_filters.Subscriber("/assembly/zivid/furniture_part/is_results", InstanceSegmentation2D)
 
@@ -81,13 +82,11 @@ class PoseEstimator:
 
         test_configpath = os.path.join(self.workspace_path,'cfg_eval', self.params["test_config"])
         test_args = configparser.ConfigParser()
-        # test_args.read(test_configpath)
+        test_args.read(test_configpath)
         self.ae_pose_est = AePoseEstimator(test_configpath)
         self.ply_model_paths = [str(train_args.get('Paths','MODEL_PATH')) for train_args in self.ae_pose_est.all_train_args]
 
     def inference_aae_pose(self, rgb, depth, cloud, is_results):
-
-        # TODO: undistort rgb_original, depth_original
 
         # get rgb, depth, point cloud, is_results, K
         rospy.loginfo_once("Estimating 6D pose of objects")
@@ -98,12 +97,9 @@ class PoseEstimator:
         depth_resized = cv2.resize(depth_original.copy(), dsize=(self.params["width"], self.params["height"]), interpolation=cv2.INTER_AREA)
         depth_resized = np.where(np.isnan(depth_resized), 0, depth_resized)  
 
-        cloud_zivid, valid_im2pc_idx = open3d_helper.convertZividCloudFromRosToOpen3d(cloud, skip_nans=False)
-
         # gather all detected crops
         boxes, scores, labels = [], [], []
         boxes, scores, labels, is_mask = self.gather_is_results(rgb_resized, depth_resized, boxes, scores, labels, is_results)
-        is_mask_original = cv2.resize(is_mask, (rgb_original.shape[1], rgb_original.shape[0]), interpolation=cv2.INTER_AREA)
 
         # 6D pose estimation for all detected crops
         all_pose_estimates, all_class_idcs = self.ae_pose_est.process_pose(boxes, labels, rgb_resized, depth_resized)
@@ -112,16 +108,11 @@ class PoseEstimator:
         self.visualize_pose_estimation_results(all_pose_estimates, all_class_idcs, labels, boxes, scores, rgb_resized)
 
         # crop zivid cloud with instance mask        
-        # !TODO: this part is need to be optimized using numpy
-        pc_idxes = []
-        for idx_pixel in np.ndindex(is_mask_original.shape):
-            if is_mask_original[idx_pixel] < 128 or np.isnan(depth_original[idx_pixel]):
-                continue
-            im_idx = idx_pixel[0] * rgb_original.shape[1] + idx_pixel[1]
-            pc_idx = valid_im2pc_idx[im_idx]
-            pc_idxes.append(int(pc_idx))
+        is_mask_original = cv2.resize(is_mask, (rgb_original.shape[1], rgb_original.shape[0]), interpolation=cv2.INTER_AREA)
+        is_mask_original = is_mask_original[np.isfinite(is_mask_original)]
+        cloud_zivid = open3d_helper.convertZividCloudFromRosToOpen3d(cloud, mask=is_mask_original)
 
-        cloud_zivid = cloud_zivid.select_down_sample(pc_idxes)
+        # remove outliers and scale it from m to mm
         cloud_zivid, _ = cloud_zivid.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
         cloud_zivid.scale(1000)
 
@@ -138,18 +129,9 @@ class PoseEstimator:
             T_GT2Zivid = np.matmul(T_trans, T_rot)
 
             cloud_GT = cloud_GT.transform(T_GT2Zivid)
-            print(T_GT2Zivid)
-
-            cloud_zivid.estimate_normals(
-                o3d.geometry.KDTreeSearchParamHybrid(radius=0.3, max_nn=30)
-            )
-            cloud_GT.estimate_normals(
-                o3d.geometry.KDTreeSearchParamHybrid(radius=0.3, max_nn=30)
-            )
-
-            icp_result = self.icp_refinement(source_cloud=cloud_GT, target_cloud=cloud_zivid)
-            refined_cloud_GT = cloud_GT.transform(icp_result.transformation)
-            rospy.loginfo("icp result- fitness: {}, RMSE: {}, T: ".format(
+            icp_result = self.icp_refinement(source_cloud=cloud_zivid, target_cloud=cloud_GT)
+            refined_cloud_GT = copy.deepcopy(cloud_zivid).transform(icp_result.transformation)
+            rospy.loginfo("icp result- fitness: {}, RMSE: {}, T: {}".format(
                 icp_result.fitness, icp_result.inlier_rmse, icp_result.transformation))
 
             o3d.visualization.draw_geometries([
@@ -237,16 +219,19 @@ class PoseEstimator:
         source_cloud = source_cloud.select_down_sample(source_idxes)
         target_cloud = target_cloud.select_down_sample(target_idxes)
 
+        threshold = 0.02
+        trans_init = np.eye(4)
+        evaluation = o3d.registration.evaluate_registration(source_cloud, target_cloud, threshold, trans_init)
         result_icp = o3d.registration.registration_icp(
-            source = source_cloud, target = target_cloud, max_correspondence_distance=0.2, 
+            source = source_cloud, target = target_cloud, max_correspondence_distance=500, # unit in millimeter
             init = np.eye(4),  
-            estimation_method = o3d.registration.TransformationEstimationPointToPlane(), 
+            estimation_method = o3d.registration.TransformationEstimationPointToPoint(), 
             criteria = o3d.registration.ICPConvergenceCriteria(
-                                                relative_fitness=1e-4,
-                                                relative_rmse=1e-4,
-                                                max_iteration=500)
-                                                )
-        return result_icp                                                
+                                                relative_fitness=1e-10,
+                                                relative_rmse=1e-8,
+                                                max_iteration=500))
+                                                
+        return result_icp
     
 if __name__ == '__main__':
 
