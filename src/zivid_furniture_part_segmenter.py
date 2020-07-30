@@ -55,10 +55,10 @@ class PartSegmenter:
                             std=[0.229, 0.224, 0.225]),
                             ])
         self.bridge = cv_bridge.CvBridge()
-        self.class_names = ["background", "side", "short_long", "middle", "bottom"]
+        self.class_names = ["background", "side_right", "long_short", "middle", "bottom"]
 
-        rgb_sub = message_filters.Subscriber("/zivid_camera/color_rect/image_color", Image)
-        depth_sub = message_filters.Subscriber("/zivid_camera/depth_rect/image_raw", Image)
+        rgb_sub = message_filters.Subscriber("/zivid_camera/color/image_color", Image)
+        depth_sub = message_filters.Subscriber("/zivid_camera/depth/image_raw", Image)
         self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size=5, slop=1)
         rospy.loginfo("Starting zivid rgb-d subscriber with time synchronizer")
         # from rgb-depth images, inference the results and publish it
@@ -162,7 +162,7 @@ class PartSegmenter:
             box.width = np.asscalar(x2 - x1)
             is_msg.boxes.append(box)
             
-            class_id = pred_labels[i]    
+            class_id = pred_labels[i] - 1 # remove background label
             is_msg.class_ids.append(class_id) 
 
             class_name = self.class_names[class_id]
@@ -172,7 +172,6 @@ class PartSegmenter:
             is_msg.scores.append(score)
 
             mask = Image()
-
             mask.header = is_msg.header
             mask.height = pred_masks[i].shape[1]
             mask.width = pred_masks[i].shape[2]

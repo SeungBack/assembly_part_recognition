@@ -39,6 +39,9 @@ roslaunch assembly_part_recognition azure_scene.launch
 roslaunch assembly_camera_manager zivid_manager.launch
 python ~/catkin_ws/src/assembly_camera_manager/scripts/receive_zivid_repeat.py
 
+# extrinsic calibration
+rosservice call /zivid_camera/extrinsic_calibration
+
 # pose estimation
 roslaunch assembly_part_recognition zivid_funiture_part.launch
 roslaunch assembly_part_recognition 6d_pose_estimator.launch
@@ -48,7 +51,6 @@ roslaunch assembly_part_recognition zivid_connector.launch
 roslaunch assembly_part_recognition zivid_scene.launch
 roslaunch assembly_part_recognition zivid_hole.launch
 
-rosservice call /zivid_camera/extrinsic_calibration
 
 
 rqt_image_view
@@ -69,13 +71,6 @@ This work was supported by Institute for Information & Communications Technology
 
 ---
 
-## Problem: point cloud alignment
-```
-definition: we have obj2cam transformation matrix T, target mesh M, and captured mesh C. We expected that T*C=M, however is not
-```
-possible walkthroughs:
-* (x) simple inverse matrix problem
-* (ongoing) Mismatching coordinate problem 
-    opengl: -z as forward, but real: z as forward
-* () obj -> K -> world?
-* () rendering code?
+## References
+
+- pose messages from https://github.com/NVlabs/Deep_Object_Pose
