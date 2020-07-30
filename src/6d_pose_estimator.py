@@ -286,7 +286,7 @@ class PoseEstimator:
                 marker.color.r = color[0] / 255.0
                 marker.color.g = color[1] / 255.0
                 marker.color.b = color[2] / 255.0
-                marker.color.a = 0.4
+                marker.color.a = 0.3
                 marker.ns = "bboxes"
                 marker.id = i
                 marker.type = Marker.CUBE
@@ -305,29 +305,28 @@ class PoseEstimator:
                 marker.id = i
                 marker.ns = "texts"
                 marker.type = Marker.TEXT_VIEW_FACING
-                marker.scale.x = 0.1
-                marker.scale.y = 0.1
                 marker.scale.z = 0.1
                 marker.text = '{} ({:.2f})'.format(name, det.results[0].score)
                 markers.markers.append(marker)
 
                 # mesh marker
-                # marker = Marker()
-                # marker.header = detection_array.header
-                # marker.action = Marker.ADD
-                # marker.pose = det.bbox.center
-                # marker.color.r = color[0] / 255.0
-                # marker.color.g = color[1] / 255.0
-                # marker.color.b = color[2] / 255.0
-                # marker.color.a = 0.7
-                # marker.ns = "meshes"
-                # marker.id = i
-                # marker.type = Marker.MESH_RESOURCE
-                # marker.scale.x = 1
-                # marker.scale.y = 1
-                # marker.scale.z = 1
-                # marker.mesh_resource = self.ply_model_paths[det.results[0].id][:-4] + '.obj'
-                # markers.markers.append(marker)
+                marker = Marker()
+                marker.header = detection_array.header
+                marker.action = Marker.ADD
+                marker.pose = det.bbox.center
+                marker.color.r = color[0] / 255.0
+                marker.color.g = color[1] / 255.0
+                marker.color.b = color[2] / 255.0
+                marker.color.a = 0.8
+                marker.ns = "meshes"
+                marker.id = i
+                marker.type = Marker.MESH_RESOURCE
+                marker.scale.x = 0.001
+                marker.scale.y = 0.001
+                marker.scale.z = 0.001
+                marker.mesh_resource = "file://" + self.ply_model_paths[det.results[0].id]
+                marker.mesh_use_embedded_materials = True
+                markers.markers.append(marker)
 
 
             self.pub_markers.publish(markers)
