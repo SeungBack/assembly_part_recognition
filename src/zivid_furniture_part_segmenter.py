@@ -91,12 +91,8 @@ class PartSegmenter:
         rgb_save.save(os.path.join(save_dir, "{}.png".format(save_name)))
         np.save(os.path.join(save_dir, "{}.npy".format(save_name)), depth_save)
 
-        # np.save(os.path.join(save_dir, save_name + "_rgb.npy"), rgb_save)
-        # np.save(os.path.join(save_dir, save_name + "_depth.npy"), depth_save)
-
-
     def inference(self, rgb, depth):
-        self.save_inference_data(rgb, depth)
+        # self.save_inference_data(rgb, depth)
 
         rospy.loginfo_once("Segmenting furniture_part area")
         rgb = self.bridge.imgmsg_to_cv2(rgb, desired_encoding='bgr8')

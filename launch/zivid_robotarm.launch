@@ -1,0 +1,4 @@
+<launch>
+  <rosparam command="load" file="$(find assembly_part_recognition)/param/zivid_robotarm.yaml" ns="zivid_robotarm" />
+  <node name="zivid_robotarm_segmenter" pkg="assembly_part_recognition" type="zivid_robotarm_segmenter.py" output="screen"/>
+</launch>

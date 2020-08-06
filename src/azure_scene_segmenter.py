@@ -188,21 +188,6 @@ class SceneSegmenter:
        
         return np.asarray(image.convert("RGB"))
 
-    """
-    def visualize_prediction(self, rgb_img, full_mask):
-        
-        rgb_img = np.uint8(rgb_img) # [768, 1024, 3]
-
-        full_mask = full_mask.astype(np.uint8)
-        full_mask = 255*full_mask.transpose((1, 2, 0))
-        rgb_img = cv2.addWeighted(rgb_img, 1, full_mask, 0.5, 0)
-
-        return np.uint8(rgb_img)
-
-    """
-
-
-
 
 if __name__ == '__main__':
 

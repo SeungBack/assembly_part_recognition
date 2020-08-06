@@ -1,0 +1,8 @@
+pytorch_module_path: "/home/demo/Workspace/assembly_hole_segmentation"
+weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weights/hole/depth_noise_unet_hand.pt"
+width: 640
+height: 400
+min_depth: 1.3
+max_depth: 3.0
+gpu_id: "0"
+

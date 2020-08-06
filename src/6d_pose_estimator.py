@@ -74,7 +74,7 @@ class PoseEstimator:
         # publishers
         self.vis_pub = rospy.Publisher('/assembly/zivid/furniture_part/6d_pose_vis_results', Image, queue_size=1)
         self.pose_pubs = [] # "side_right", "long_short", "middle", "bottom"
-        self.idx2color = [[13, 255, 128], [0, 104, 255], [217, 12, 232], [232, 222, 12]]
+        self.idx2color = [[13, 128, 255], [255, 12, 12], [217, 12, 232], [232, 222, 12]]
         self.dims = []
         self.cloud_GTs = []
         for ply_model in self.ply_model_paths:
@@ -84,7 +84,7 @@ class PoseEstimator:
             model_name = ply_model.split('/')[-1][5:-4]
             self.pose_pubs.append(rospy.Publisher(
                 '/assembly/zivid/furniture_part/pose_{}'.format(model_name), PoseStamped, queue_size=1))
-        self.pub_detections = rospy.Publisher('/assembly/zivid/furniture_part/detected_objects', Detection3DArray, queue_size=1)
+        self.pub_detections = rospy.Publisher('/assembly/zivid/furniture_part/6d_pose_est_results', Detection3DArray, queue_size=1)
         self.pub_markers = rospy.Publisher('/assembly/zivid/furniture_part/markers', MarkerArray, queue_size=1)
         
     def estimate_6d_pose(self, rgb, depth, cloud, is_results):
@@ -105,7 +105,7 @@ class PoseEstimator:
         # 6D pose estimation for all detected crops using AAE
         all_pose_estimates, all_class_idcs = self.ae_pose_est.process_pose(boxes, labels, rgb_resized, depth_resized)
 
-        # visualize pose estimation results
+        # visualize pose estimation results using only AAE
         self.visualize_pose_estimation_results(all_pose_estimates, all_class_idcs, labels, boxes, scores, rgb_resized)
 
         detection_array = Detection3DArray()
@@ -171,6 +171,8 @@ class PoseEstimator:
         
         self.pub_detections.publish(detection_array)
         self.publish_markers(detection_array)
+
+        
 
 
     def gather_is_results(self, rgb, depth, boxes, scores, labels, is_results):
@@ -305,7 +307,7 @@ class PoseEstimator:
                 marker.id = i
                 marker.ns = "texts"
                 marker.type = Marker.TEXT_VIEW_FACING
-                marker.scale.z = 0.1
+                marker.scale.z = 0.07
                 marker.text = '{} ({:.2f})'.format(name, det.results[0].score)
                 markers.markers.append(marker)
 
@@ -317,7 +319,7 @@ class PoseEstimator:
                 marker.color.r = color[0] / 255.0
                 marker.color.g = color[1] / 255.0
                 marker.color.b = color[2] / 255.0
-                marker.color.a = 0.8
+                marker.color.a = 0.9
                 marker.ns = "meshes"
                 marker.id = i
                 marker.type = Marker.MESH_RESOURCE
