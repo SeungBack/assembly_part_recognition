@@ -1,0 +1,7 @@
+<launch>
+
+  <arg name="yaml" default="azure_hole_seg"/>
+
+  <rosparam command="load" file="$(find assembly_part_recognition)/param/$(arg yaml).yaml" ns="hole_seg" />
+  <node name="hole_segmenter" pkg="assembly_part_recognition" type="hole_segmenter.py" output="screen"/>
+</launch>

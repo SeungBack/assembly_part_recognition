@@ -5,7 +5,6 @@ import torchvision
 import argparse
 import json
 import rospy
-from zivid_camera.srv import *
 from std_msgs.msg import String
 from sensor_msgs.msg import PointCloud2, Image
 import cv2, cv_bridge
@@ -19,7 +18,6 @@ import sys
 import os
 import torch.nn.functional as F
 import torch.nn as nn
-from hole_catcher import hole_catcher
 
 
 #pred_mask is numpy.argmax of model output (with 0,1)
@@ -68,7 +66,6 @@ def hole_catcher(pred_mask, real_img, threshold):
             center_mask[x_avg][y_avg]=1
             cv2.putText(real_img, '{}'.format(k),(y_avg+20,x_avg), fontFace=2, fontScale=0.5, color=[0,150,0], thickness = 2)
     checked_img = real_img+label
-    #cv2.imwrite('hh/label_{}_{}.jpg'.format(len(np.unique(holes))-1, pp), iii)
 
     return center_mask, checked_img
 
@@ -77,27 +74,15 @@ class HoleSegmenter:
     def __init__(self):
 
         # initalize node
-        rospy.init_node('zivid_hole_segmenter')
-        rospy.loginfo("Starting zivid_hole_segmenter.py")
+        rospy.init_node('hole_segmenter')
+        rospy.loginfo("Starting hole_segmenter.py")
 
-        self.params = rospy.get_param("zivid_hole")
-        self.hs_pub = rospy.Publisher('/assembly/zivid/hole/hole_vis_results', Image, queue_size=10)
-
-        self.initialize_model()
-        self.rgb_transform = transforms.Compose([
-                            transforms.ToTensor(),
-                            transforms.Normalize(
-                            mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225]),
-                            ])
+        self.params = rospy.get_param("hole_seg")
         self.bridge = cv_bridge.CvBridge()
-
-        rgb_sub = message_filters.Subscriber("/zivid_camera/color/image_color", Image)
-        depth_sub = message_filters.Subscriber("/zivid_camera/depth/image_raw", Image)
-        self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size=5, slop=0.1)
-        rospy.loginfo("Starting zivid rgb-d subscriber with time synchronizer")
-        # from rgb-depth images, inference the results and publish it
-        self.ts.registerCallback(self.inference)
+        self.initialize_model()
+        rgb_sub = rospy.Subscriber(self.params["rgb"], Image, self.inference)
+        if self.params["debug"]:
+            self.hs_pub = rospy.Publisher('/assembly/hole/vis_results', Image, queue_size=10)
 
     def initialize_model(self):
 
@@ -109,12 +94,20 @@ class HoleSegmenter:
         self.model.cuda()
         self.model.load_state_dict(torch.load(self.params['weight_path']))
         self.model.eval()
+        self.rgb_transform = transforms.Compose([
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225]),
+                    ])
+        self.roi = self.params["roi"]
 
-    def inference(self, rgb, depth):
+    def inference(self, rgb):
 
         rospy.loginfo_once("Segmenting hole")
         rgb = self.bridge.imgmsg_to_cv2(rgb, desired_encoding='bgr8')
         rgb_cv = cv2.resize(rgb, (self.params["width"], self.params["height"]), interpolation=cv2.INTER_AREA)
+        rgb_cv = rgb_cv[self.roi[2]:self.roi[3], self.roi[0]:self.roi[1]]
         rgb = self.rgb_transform(rgb_cv).unsqueeze(0)
 
         input_data = rgb
@@ -122,7 +115,8 @@ class HoleSegmenter:
         pred = pred.cpu().detach().numpy()
         pred = np.argmax(pred, axis=0) 
         hole_results, hole_vis_results = hole_catcher(pred, rgb_cv, self.params["cluster_thresh"])
-        self.hs_pub.publish(self.bridge.cv2_to_imgmsg(np.uint8(hole_vis_results), "bgr8"))
+        if self.params["debug"]:
+            self.hs_pub.publish(self.bridge.cv2_to_imgmsg(np.uint8(hole_vis_results), "bgr8"))
         
 
 

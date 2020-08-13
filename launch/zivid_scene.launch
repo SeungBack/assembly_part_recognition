@@ -1,4 +1,0 @@
-<launch>
-  <rosparam command="load" file="$(find assembly_part_recognition)/param/zivid_scene.yaml" ns="zivid_scene" />
-  <node name="zivid_scene_segmenter" pkg="assembly_part_recognition" type="zivid_scene_segmenter.py" output="screen"/>
-</launch>

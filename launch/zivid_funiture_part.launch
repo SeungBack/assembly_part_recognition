@@ -1,4 +1,0 @@
-<launch>
-  <rosparam command="load" file="$(find assembly_part_recognition)/param/zivid_furniture_part.yaml" ns="zivid_furniture_part" />
-  <node name="zivid_furniture_part_segmenter" pkg="assembly_part_recognition" type="zivid_furniture_part_segmenter.py" output="screen"/>
-</launch>

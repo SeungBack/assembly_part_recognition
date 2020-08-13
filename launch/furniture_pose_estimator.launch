@@ -1,0 +1,6 @@
+<launch>
+  <arg name="yaml" default="azure_furniture_pose_estimator"/>
+
+  <rosparam command="load" file="$(find assembly_part_recognition)/param/$(arg yaml).yaml" ns="furniture_pose_estimator" />
+  <node name="furniture_pose_estimator" pkg="assembly_part_recognition" type="furniture_pose_estimator.py" output="screen"/>
+</launch>

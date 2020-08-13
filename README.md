@@ -24,7 +24,8 @@ Furniture recognizer for furniture assembly project using Mask R-CNN
 - [zivid_ros_driver](https://github.com/zivid/zivid-ros)
 - assembly part segmentation
 
-### Azure 
+
+### How to use
 
 ```
 # launch camera node and do extrinsic calibration
@@ -32,34 +33,12 @@ $ ROS_NAMESPACE=azure1 roslaunch azure_kinect_ros_driver driver.launch color_res
 $ roslaunch assembly_camera_manager single_azure_manager.launch 
 $ rosservice call /azure1/extrinsic_calibration
 
-$ roslaunch assembly_part_recognition azure_furniture_part.launch
-$ roslaunch assembly_part_recognition azure_connector.launch
-$ roslaunch assembly_part_recognition azure_scene.launch
-
+# launch ros nodes
+$ roslaunch assembly_part_recognition hole_segmenter.launch 
+$ roslaunch assembly_part_recognition robotarm_segmenter.launch
+$ roslaunch assembly_part_recognition furniture_segmenter.launch 
+$ roslaunch assembly_part_recognition furniture_pose_estimator.launch 
 ```
-
-### Zivid
-```
-# camera
-$ roslaunch assembly_camera_manager zivid_manager.launch
-$ python ~/catkin_ws/src/assembly_camera_manager/src/capture_zivid.py
-
-# extrinsic calibration
-$ rosservice call /zivid_camera/extrinsic_calibration
-
-# segmentation
-$ roslaunch assembly_part_recognition zivid_connector.launch
-$ roslaunch assembly_part_recognition zivid_scene.launch
-$ roslaunch assembly_part_recognition zivid_hole.launch
-$ roslaunch assembly_part_recognition zivid_robotarm.launch
-
-# pose estimation
-$ roslaunch assembly_part_recognition zivid_funiture_part.launch
-$ roslaunch assembly_part_recognition 6d_pose_estimator.launch
-$ roslaunch assembly_part_recognition 6d_pose_tracker.launch
-
-```
-
 
 ## Authors
 

@@ -1,0 +1,8 @@
+pytorch_module_path: "/home/demo/Workspace/assembly_hole_segmentation"
+weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weights/robotarm/0813_unet_hand_v15.pt"
+width: 640
+height: 400
+rgb: "/azure1/rgb/image_raw"
+gpu_id: "0"
+debug: true
+

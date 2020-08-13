@@ -1,0 +1,7 @@
+<launch>
+
+  <arg name="yaml" default="azure_furniture_seg"/>
+
+  <rosparam command="load" file="$(find assembly_part_recognition)/param/$(arg yaml).yaml" ns="furniture_seg" />
+  <node name="furniture_segmenter" pkg="assembly_part_recognition" type="furniture_segmenter.py" output="screen"/>
+</launch>

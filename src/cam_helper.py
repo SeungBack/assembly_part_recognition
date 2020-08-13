@@ -25,7 +25,21 @@ def convertZividCloudFromRosToNumpy(ros_cloud):
 
     return np_points
 
-def convertZividCloudFromNumpyToOpen3d(np_points, mask=None):
+def convertAzureCloudFromRosToNumpy(ros_cloud):
+    """
+        optimized with numpy for processing kinect azure cloud
+        convert kinect azure ros cloud to numpy
+        if mask is not None, crop the pointcloud corresponding to the mask
+    """
+    pc = ros_numpy.numpify(ros_cloud)
+    np_points = np.zeros((len(pc), 3), dtype=np.float32)
+    np_points[:, 0] = np.resize(pc['x'], len(pc))
+    np_points[:, 1] = np.resize(pc['y'], len(pc))
+    np_points[:, 2] = np.resize(pc['z'], len(pc))
+
+    return np_points
+
+def convertCloudFromNumpyToOpen3d(np_points, mask=None):
 
     if mask is not None:
         mask = np.resize(mask, np_points.shape[0])
