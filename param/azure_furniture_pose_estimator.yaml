@@ -1,13 +1,13 @@
-augauto_module_path: "/home/demo/Workspace/seung/AugmentedAutoencoder"
-pytorch_module_path: "/home/demo/Workspace/Assembly-Part-Segmentation/furniture_part_segmentation"
-config_file: "0806_RGB_only_v2.json"
-weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weights/furniture_part/0814_snu_furniture_part.tar"
+augauto_module_path: "/home/dyros/Workspace/GIST/AugmentedAutoencoder"
+pytorch_module_path: "/home/dyros/Workspace/GIST/assembly_part_segmentation/furniture_part_segmentation"
+config_file: "rgb.json"
+weight_path: "/home/dyros/catkin_ws/src/assembly_part_recognition/pretrained_weights/furniture_part/0814_snu_furniture_part.tar"
 exp_group: "exp_group/Ikea_stefan_middle"
 test_config: "aae_maskrcnn_azure.cfg"
 rgb: "/azure1/rgb/image_raw"
 depth: "/azure1/depth_to_rgb/image_raw"
 point: "/azure1/points2"
-icp_iter: 100
+icp_iter: 1000
 gpu_id: "0"
 width: 1280
 height: 960
@@ -15,4 +15,4 @@ is_thresh: 0.9
 crop_offset: 0.1
 padding: true
 debug: true
-roi: [320, 960, 160, 800]
+roi: [250, 800, 330, 830]

@@ -7,8 +7,6 @@ import argparse
 import json
 import rospy
 
-from zivid_camera.srv import *
-
 import cv2, cv_bridge
 import numpy as np
 import PIL
@@ -22,7 +20,6 @@ import math
 from std_msgs.msg import String, Header
 from sensor_msgs.msg import PointCloud2, Image, RegionOfInterest
 from assembly_part_recognition.msg import InstanceSegmentation2D
-
 
 
 class PartSegmenter:
@@ -97,7 +94,6 @@ class PartSegmenter:
         pred_boxes = pred_results['boxes'].cpu().detach().numpy()
         pred_labels = pred_results['labels'].cpu().detach().numpy()
         pred_scores = pred_results['scores'].cpu().detach().numpy()
-       
         # inference result -> ros message (Detection2D)
         is_msg = InstanceSegmentation2D()
         is_msg.header = Header()
@@ -128,8 +124,8 @@ class PartSegmenter:
             mask.is_bigendian = False
             mask.step = mask.width
             mask.data = (np.uint8(pred_masks[i][0] * 255)).tobytes()
-            is_msg.masks.append(mask)        
-
+            is_msg.masks.append(mask)    
+                
         self.is_pub.publish(is_msg)
         if self.params["debug"]:
             vis_results = self.visualize_prediction(rgb_img, pred_masks, pred_boxes, pred_labels, pred_scores, thresh=self.params["is_thresh"])

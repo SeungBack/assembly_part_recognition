@@ -1,11 +1,47 @@
 # Assembly Furniture Recognition
 
-Furniture recognizer for furniture assembly project using Mask R-CNN
+furniture recognizer for furniture assembly project using Mask R-CNN
 
 ### Features
 - Visual recognition of furniture part and connector (IKEA STEFAN)
 - instance segmentation
 - 6d pose estimation
+
+### Nodes & Topics
+
+**fruniture_segmenter**
+segment furniture instances using mask r-cnn
+#### /assembly/furniture/is_results (assembly_part_recognition/InstanceSegmentation2D)
+instance segmentation results 
+#### /assembly/furniture/is_vis_results (sensor_msgs/Image): 
+visualization of instance segmentation results on RGB image (published only in debug mode)
+
+
+
+**hole_segmenter**
+detect and segment the hole area using U-Net
+#### /assembly/hole/is_results (sensor_msgs/Image)
+visualization of segmentation results on RGB image (published only in debug mode)
+
+
+
+**furniture_pose_estimator**
+segment and estimate the 6d pose of furniture instances using mask r-cnn, AAE, and ICP (this node includes the functionality of furniture-segmenter node)
+
+#### /assembly/furniture/markers (visualization_msgs/MarkerArray)
+6d pose markers for visualization in rviz
+
+#### /assembly/furniture/pose (vision_msgs/Detection3DArray)
+6d pose estimation results
+
+#### /assembly/furniture/pose_vis_results (sensor_msgs/Image)
+visualization of 6d pose estimation results using only RGB (without ICP, published only in debug mode)
+
+#### /assembly/furniture/pose_(furniture part) (geometry_msgs/PoseStampled)
+visualization of 6d pose estimation results after ICP refinement 
+
+
+
 
 ### To Do
 - segmentation mask filtering and refinement
