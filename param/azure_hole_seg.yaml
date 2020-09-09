@@ -1,3 +1,4 @@
+pytorch_module_path: "/home/dyros/Workspace/GIST/assembly_hole_segmentation"
 pytorch_module_path: "/home/demo/Workspace/assembly_hole_segmentation"
 weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weights/hole/0814_snu_hole_zivid.pt"
 rgb: "/azure1/rgb/image_raw"
@@ -6,4 +7,4 @@ height: 600
 cluster_thresh: 
 gpu_id: "0"
 debug: true
-roi: [200, 760, 150, 450]
+roi: [0, 960, 0, 600]

@@ -62,9 +62,9 @@ def hole_catcher(pred_mask, real_img, threshold):
             avg = np.average(dots, axis=0)
             x_avg = int(avg[0])
             y_avg = int(avg[1])
-            cv2.circle(real_img, (y_avg,x_avg), 15, [0,0,255], 3)
+            cv2.circle(real_img, (y_avg,x_avg), 15, [0,0,255], 1)
             center_mask[x_avg][y_avg]=1
-            cv2.putText(real_img, '{}'.format(k),(y_avg+20,x_avg), fontFace=2, fontScale=0.5, color=[0,150,0], thickness = 2)
+            # cv2.putText(real_img, '{}'.format(k),(y_avg+20,x_avg), fontFace=2, fontScale=0.5, color=[0,150,0], thickness = 2)
     checked_img = real_img+label
 
     return center_mask, checked_img
