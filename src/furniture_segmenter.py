@@ -49,6 +49,9 @@ class PartSegmenter:
         # import maskrcnn from pytorch module        
         sys.path.append(self.params["pytorch_module_path"])
         from models import maskrcnn
+        from sort import *
+        self.mot_tracker = Sort()
+        
         # load config files
         with open(os.path.join(self.params["pytorch_module_path"], 'config', self.params["config_file"])) as config_file:
             self.config = json.load(config_file)
@@ -67,6 +70,7 @@ class PartSegmenter:
                     ])
 
     def save_inference_data(self, rgb, depth, save_dir=None):
+        
         rgb_save = self.bridge.imgmsg_to_cv2(rgb, desired_encoding='bgr8')
         rgb_save = cv2.cvtColor(rgb_save, cv2.COLOR_BGR2RGB)
         rgb_save = PIL.Image.fromarray(np.uint8(rgb_save), mode="RGB")
@@ -133,6 +137,7 @@ class PartSegmenter:
         self.is_pub.publish(is_msg)
         if self.params["debug"]:
             vis_results = self.visualize_prediction(rgb_img, pred_masks, pred_boxes, pred_labels, pred_scores, thresh=self.params["is_thresh"])
+            vis_results = self.visualize_tracking(vis_results, pred_boxes, pred_labels, pred_scores, thresh=self.params["is_thresh"])
             self.vis_pub.publish(self.bridge.cv2_to_imgmsg(vis_results, "bgr8"))
 
     def visualize_prediction(self, rgb_img, masks, boxes, labels, score, thresh=0.5):
@@ -170,6 +175,37 @@ class PartSegmenter:
                     (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 1, color, lw)
 
         return np.uint8(rgb_img)
+
+    def visualize_tracking(self, rgb_img, boxes, labels, score, thresh=0.5):
+        track_ids_1 = np.where(score > thresh)[0]
+        track_ids = []
+        track_bboxes = []
+        for track_id in track_ids_1:
+            x1, y1, x2, y2 = boxes[track_id]
+            if x1 < self.roi[0] or x2 > self.roi[1] or y1 < self.roi[2] or y2 > self.roi[3]:  
+                pass
+            else:
+                track_ids.append(track_id) 
+        track_id = np.array(track_id)
+        track_bboxes = np.uint16(boxes[track_ids])
+        track_scores = np.expand_dims(score[track_ids], axis=1)
+        track_labels = np.expand_dims(labels[track_ids], axis=1)
+        track_target = np.hstack((track_bboxes, track_scores))
+        track_target = np.hstack((track_target, track_labels))
+        track_result = self.mot_tracker.update(track_target)               
+
+        for x1, y1, x2, y2, obj_id, cls_pred in track_result:
+            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+            color = [255, 0, 0]
+            # cv2.rectangle(rgb_img, (x1, y1), (x2, y2), color, 4)
+            vis_txt = "class:{} id:{}".format(int(cls_pred), int(obj_id))
+            cv2.putText(rgb_img, vis_txt, (x1, y1 - 23), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 3)
+
+        return np.uint8(rgb_img)
+
+
+        
+
 
 
 

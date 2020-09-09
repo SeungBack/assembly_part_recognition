@@ -1,6 +1,7 @@
 augauto_module_path: "/home/demo/Workspace/seung/AugmentedAutoencoder"
 exp_group: "exp_group/Ikea_stefan_middle"
 test_config: "aae_maskrcnn_zivid.cfg"
+rgb: "/zivid_camera/color/image_color"
 gpu_id: "0"
 width: 640
 height: 400

@@ -23,15 +23,22 @@ Furniture recognizer for furniture assembly project using Mask R-CNN
 - [azure_kinect_ros_driver](https://github.com/microsoft/Azure_Kinect_ROS_Driver)
 - [zivid_ros_driver](https://github.com/zivid/zivid-ros)
 - assembly part segmentation
-
+- tensorflow 1.14
 
 ### How to use
 
 ```
 # launch camera node and do extrinsic calibration
+# azure
 $ ROS_NAMESPACE=azure1 roslaunch azure_kinect_ros_driver driver.launch color_resolution:=1536P depth_mode:=WFOV_UNBINNED fps:=5  tf_prefix:=azure1_
 $ roslaunch assembly_camera_manager single_azure_manager.launch 
 $ rosservice call /azure1/extrinsic_calibration
+
+# zivid
+# roslaunch assembly_camera_manaer zivid_manager.launch
+# rosservice call /zivid_camera/extrinsic_calibration
+# python ~/catkin_ws/src/assembly_camera_manager/src/capture_zivid.py
+
 
 # launch ros nodes
 $ roslaunch assembly_part_recognition hole_segmenter.launch 

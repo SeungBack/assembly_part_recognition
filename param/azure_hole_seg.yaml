@@ -3,7 +3,7 @@ weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weig
 rgb: "/azure1/rgb/image_raw"
 width: 960
 height: 600
-cluster_thresh: 5
+cluster_thresh: 
 gpu_id: "0"
 debug: true
 roi: [200, 760, 150, 450]

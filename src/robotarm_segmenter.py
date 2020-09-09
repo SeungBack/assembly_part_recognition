@@ -48,7 +48,7 @@ class RobotArmSegmenter:
         sys.path.append(self.params["pytorch_module_path"])
         os.environ["CUDA_VISIBLE_DEVICES"] = self.params["gpu_id"]
         from unet import UNet
-        self.model = nn.DataParallel(UNet(n_channels=3, n_classes=2, bilinear=True))
+        self.model = UNet(n_channels=3, n_classes=2, bilinear=True)#nn.DataParallel(UNet(n_channels=3, n_classes=2, bilinear=True))
         self.model.cuda()
         self.model.load_state_dict(torch.load(self.params['weight_path']))
         self.model.eval()
@@ -59,12 +59,15 @@ class RobotArmSegmenter:
         rgb = self.bridge.imgmsg_to_cv2(rgb, desired_encoding='bgr8')
         rgb_cv = cv2.resize(rgb, (self.params["width"], self.params["height"]), interpolation=cv2.INTER_AREA)
         rgb = PIL.Image.fromarray(rgb_cv)
-        rgb = self.rgb_transform(rgb).unsqueeze(0)
+        rgb = self.rgb_transform(rgb).unsqueeze(0).cuda()
 
         pred = self.model(rgb).squeeze(dim=0)
         pred = pred.cpu().detach().numpy()
+        print(np.unique(pred[0]))
+        print(np.unique(pred[1]))
+        print("---")
         pred = np.argmax(pred, axis=0) # 400, 640
-
+       
         if self.params["debug"]:
             pred = np.uint8(pred*255)
             color = np.array([10, 255, 10])

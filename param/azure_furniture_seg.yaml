@@ -4,6 +4,6 @@ weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weig
 rgb: "/azure1/rgb/image_raw"
 width: 1280
 height: 960
-debug: false
-is_thresh: 0.9
+debug: true
+is_thresh: 0.98
 roi: [320, 960, 160, 800]
