@@ -1,7 +1,6 @@
 # Assembly Furniture Recognition
 
 ## Features
----
 - Furniture recognition toolkits for furniture assembly project (IKEA STEFAN)
 - Instance segmentation using [Mask R-CNN](https://openaccess.thecvf.com/content_iccv_2017/html/He_Mask_R-CNN_ICCV_2017_paper.html)
 - 6d pose estimation using [Augmented AutoEncoder (AAE)](https://openaccess.thecvf.com/content_ECCV_2018/html/Martin_Sundermeyer_Implicit_3D_Orientation_ECCV_2018_paper.html) and [Multi-Path Augmented AutoEncoder (MPAAE)](https://openaccess.thecvf.com/content_CVPR_2020/html/Sundermeyer_Multi-Path_Learning_for_Object_Pose_Estimation_Across_Domains_CVPR_2020_paper.html)
@@ -15,19 +14,17 @@
 
 ## Getting Started
 
-- tensorflow 1.14
-- python 2.7 (local, /usr/bin/python)
+- python 2.7 
+- tensorflow == 1.14
 - torch 1.3.0
 - torchvision 0.4.1
 - [azure_kinect_ros_driver](https://github.com/microsoft/Azure_Kinect_ROS_Driver)
 - [assemlby_camera_manager](https://github.com/SeungBack/assembly_camera_manager)
 - [zivid_ros_driver](https://github.com/zivid/zivid-ros)
 - [open3d-ros-helper](https://github.com/SeungBack/open3d-ros-helper)
-- assembly part segmentation (This repository is private at the moment)
 
 
 ## Published Topics
----
 #### `/assembly/vis_is`
 - message type: `sensor_msgs/Image`
 - Visualization results of instance segmentation 
@@ -55,7 +52,6 @@
 
 
 ## How to use
----
 ### Single Camera Setup (Kinect Azure)
 1. launch k4a driver
 ```
@@ -79,13 +75,10 @@ rosrun rviz rviz -d single_azure.rviz
 ```
 
 ## Authors
----
 * **Seunghyeok Back** [seungback](https://github.com/SeungBack)
 
 ## License
----
 This project is licensed under the MIT License
 
 ## Acknowledgments
----
 This work was supported by Institute for Information & Communications Technology Promotion(IITP) grant funded by Korea goverment(MSIT) (No.2019-0-01335, Development of AI technology to generate and validate the task plan for assembling furniture in the real and virtual environment by understanding the unstructured multi-modal information from the assembly manual.
