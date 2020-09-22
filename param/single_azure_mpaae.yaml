@@ -1,0 +1,30 @@
+is_config_path: "/home/demo/Workspace/Assembly-Part-Segmentation/furniture_part_segmentation/config/0806_RGB_only_v2.json"
+is_weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weights/furniture_part/0908_Azure_SIM_v151617_RGB_only_aug2_epoch_12.tar"
+
+pe_module_path: "/home/demo/Workspace/seung/AugmentedAutoencoder"
+pe_experiment_name: "exp_group/ikea_stefan"
+pe_test_config: "mpaae_maskrcnn_azure.cfg"
+
+ply_model_dir: "/home/demo/catkin_ws/src/assembly_part_recognition/src/AugmentedAutoencoder/3d_models/ply"
+black_borders: True
+
+n_points: 3000
+n_iter: 1000
+tolerance: 0.005
+num_levels: 5
+
+camera_info: "/azure1/rgb/camera_info"
+rgb: "/azure1/rgb/image_raw"
+depth: "/azure1/depth_to_rgb/image_raw"
+# point: "/points2/merged"
+point: "/azure1/points2"
+camera_frame: "azure1_rgb_camera_link"
+icp_iter: 3000
+gpu_id: "1"
+width: 1280
+height: 720
+is_thresh: 0.98
+crop_offset: 0.01
+debug: true
+roi: [0, 1280, 0, 720]
+

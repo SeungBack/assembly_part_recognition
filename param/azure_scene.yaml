@@ -1,9 +1,0 @@
-#pytorch_module_path: "/home/demo/Workspace/Assembly-scene-segmentation"
-pytorch_module_path: "/home/demo/Workspace/Assembly-scene-segmentation_4class"
-#pytorch_module_path: "/home/demo/Workspace/Assembly-scene-segmentation_2class"
-#weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weights/scene/checkpoint.pth"
-weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weights/scene/checkpoint_4class.pth"
-#weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weights/scene/checkpoint_2class.pth"
-out_threshold: 0.2
-width: 1024
-height: 768
