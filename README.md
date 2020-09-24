@@ -19,9 +19,15 @@
 - torch 1.3.0
 - torchvision 0.4.1
 - [azure_kinect_ros_driver](https://github.com/microsoft/Azure_Kinect_ROS_Driver)
-- [assemlby_camera_manager](https://github.com/SeungBack/assembly_camera_manager)
+- [assembly_camera_manager](https://github.com/SeungBack/assembly_camera_manager)
 - [zivid_ros_driver](https://github.com/zivid/zivid-ros)
 - [open3d-ros-helper](https://github.com/SeungBack/open3d-ros-helper)
+- Setup environment using anaconda3
+```
+conda create -n assembly python=2
+conda env create -f environment.yml
+conda activate assembly 
+```
 
 
 ## Published Topics
@@ -41,11 +47,11 @@
 - message type: `visualization_msgs/MarkerArray`
 - Visualization markers for AAE + ICP
 
-#### `/assembly/detection/aae` 
+#### `/assembly/detections/aae` 
 - message type: `vision_msgs/Detection3DArray`
 - 6d pose estimation results from AAE
 
-#### `/assembly/detection/aae` 
+#### `/assembly/detections/icp` 
 - message type: `vision_msgs/Detection3DArray`
 - 6d pose estimation results from AAE + ICP
 
