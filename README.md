@@ -5,12 +5,13 @@
 - Instance segmentation using [Mask R-CNN](https://openaccess.thecvf.com/content_iccv_2017/html/He_Mask_R-CNN_ICCV_2017_paper.html)
 - 6d pose estimation using [Augmented AutoEncoder (AAE)](https://openaccess.thecvf.com/content_ECCV_2018/html/Martin_Sundermeyer_Implicit_3D_Orientation_ECCV_2018_paper.html) and [Multi-Path Augmented AutoEncoder (MPAAE)](https://openaccess.thecvf.com/content_CVPR_2020/html/Sundermeyer_Multi-Path_Learning_for_Object_Pose_Estimation_Across_Domains_CVPR_2020_paper.html)
 
+![mpaae_sample](./MPAAE_sample.png)
 ![detection_sample](./detection_sample.png)
 
 
 ## To Do
 
-- list up ros dependencies
+- list up ROS dependencies
 
 ## Getting Started
 
@@ -19,14 +20,22 @@
 - torch 1.3.0
 - torchvision 0.4.1
 - [azure_kinect_ros_driver](https://github.com/microsoft/Azure_Kinect_ROS_Driver)
-- [assembly_camera_manager](https://github.com/SeungBack/assembly_camera_manager)
 - [zivid_ros_driver](https://github.com/zivid/zivid-ros)
 - [open3d-ros-helper](https://github.com/SeungBack/open3d-ros-helper)
-- Setup environment using anaconda3
+- [assembly_msgs](https://github.com/psh117/assembly_msgs)
+- [assembly_camera_manager](https://github.com/SeungBack/assembly_camera_manager)
+- [AugmentedAutoEncoder](https://github.com/DLR-RM/AugmentedAutoencoder/tree/multipath)
 ```
-conda create -n assembly python=2
+# setup environment using anaconda3
 conda env create -f environment.yml
 conda activate assembly 
+# install autopose (AAE)
+cd src
+git clone https://github.com/SeungBack/AugmentedAutoencoder.git
+cd AugmentedAutoencoder && git checkout multipath
+pip install --user .
+# install ros dependencies
+pip install -U rosdep rosinstall_generator wstool rosinstall six vcstools
 ```
 
 
@@ -73,7 +82,7 @@ $ rosservice call /azure1/extrinsic_calibration "target_fiducial_ids: [1]"
 ```
 4. 6d object pose estimation using MPAAE
 ```
-$ roslaunch assembly_part_recognition single_azure_mpaae.launch 
+$ roslaunch assembly_part_recognition single_azure_mpaae.launch yaml:=single_azure_mpaae_SNU
 ```
 5. visualization using RVIZ
 ```

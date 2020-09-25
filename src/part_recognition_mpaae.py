@@ -46,13 +46,11 @@ class PoseEstimator:
         rospy.loginfo("Starting part_recognition_mpaae.py")
 
         self.params = rospy.get_param("part_recognition")
-        self.is_class_names = ["ikea_stefan_side_left", "ikea_stefan_long", 
-                                "ikea_stefan_middle", "ikea_stefan_bottom"]
+        self.is_class_names = self.params["is_class_names"]
         self.pad_factors = [1.2, 1.2, 1.2, 1.2]
-        self.use_masked_crop = [True, False, False, False]
-        self.use_sameWHcrop = [True, True, True, True]
-        self.pe_class_names = ["ikea_stefan_bottom", "ikea_stefan_long", "ikea_stefan_middle", 
-                        "ikea_stefan_short", "ikea_stefan_side_left", "ikea_stefan_side_right"]
+        self.use_masked_crop = self.params["use_mask_crop"]
+        self.use_sameWH_crop =self.params["use_sameWHcrop"]
+        self.pe_class_names = self.params["pe_class_names"]
         self.classidx2color = [[13, 128, 255], [255, 12, 12], [217, 12, 232], [232, 222, 12]]
         self.color_dict = [(255,255,0), (0,0,255), (255,0,0), (255,255,0)] * 10
         self.roi = self.params["roi"]
@@ -82,28 +80,13 @@ class PoseEstimator:
         self.aae_pose_pubs = [] # "side_right", "long_short", "middle", "bottom"
         self.icp_pose_pubs = []
         self.idx2color = [[13, 128, 255], [255, 12, 12], [217, 12, 232], [232, 222, 12]]
-        self.dims = []
-        self.centroids = []
-        self.cloud_objs = []
-        for ply_model in self.ply_model_paths:
-            cloud = o3d.io.read_point_cloud(ply_model)
-            self.dims.append(cloud.get_max_bound())
-            centroid = cloud.get_center()
-            cloud = cloud.scale(0.001)
-            self.centroids.append(centroid)
-            self.cloud_objs.append(cloud)
-            model_name = ply_model.split('/')[-1][5:-4]
-            self.aae_pose_pubs.append(rospy.Publisher(
-                '/assembly/pose/aae/{}'.format(model_name), PoseStamped, queue_size=1))
-            self.icp_pose_pubs.append(rospy.Publisher(
-                '/assembly/pose/icp/{}'.format(model_name), PoseStamped, queue_size=1))
         self.aae_detections_pub = rospy.Publisher('/assembly/detections/aae', Detection3DArray, queue_size=1)
         self.icp_detections_pub = rospy.Publisher('/assembly/detections/icp', Detection3DArray, queue_size=1)
         self.aae_markers_pub = rospy.Publisher('/assembly/markers/aae', MarkerArray, queue_size=1)
         self.icp_markers_pub = rospy.Publisher('/assembly/markers/icp', MarkerArray, queue_size=1)
         if self.params["debug"]:
             self.vis_is_pub = rospy.Publisher('/assembly/vis_is', Image, queue_size=1)
-            self.pose_aae_vis_pub = rospy.Publisher('/assembly/vis_pe_aae', Image, queue_size=1)
+            # self.pose_aae_vis_pub = rospy.Publisher('/assembly/vis_pe_aae', Image, queue_size=1)
 
     def initialize_is_model(self):
         import torch
@@ -142,9 +125,23 @@ class PoseEstimator:
         full_name = self.params["pe_experiment_name"].split('/')    
         experiment_name = full_name.pop()
         experiment_group = full_name.pop() if len(full_name) > 0 else ''
-        self.ply_model_paths = glob.glob(self.params["ply_model_dir"] + '/*.ply')
-        self.ply_model_paths.sort()
+        self.ply_paths = glob.glob(self.params["model_dir"] + '/ply/*.ply')
+        self.ply_paths.sort()
+        self.ply_centered_paths = glob.glob(self.params["model_dir"] + '/ply_centered/*.ply')
+        self.ply_centered_paths.sort()
         self.codebook, self.dataset = factory.build_codebook_from_name(experiment_name, experiment_group, return_dataset = True, joint=True)
+
+        self.dims = []
+        self.centroids = []
+        self.cloud_objs = []
+        for ply_centered in self.ply_centered_paths:
+            cloud = o3d.io.read_point_cloud(ply_centered)
+            self.dims.append(cloud.get_max_bound())
+        for ply in self.ply_paths:
+            cloud = o3d.io.read_point_cloud(ply)
+            centroid = cloud.get_center()
+            self.centroids.append(centroid)
+            self.cloud_objs.append(cloud)
 
         gpu_options = tf.GPUOptions(allow_growth=True, per_process_gpu_memory_fraction = 0.5)
         config = tf.ConfigProto(gpu_options=gpu_options)
@@ -211,7 +208,7 @@ class PoseEstimator:
             y = int(y1)
             h = int(y2 - y1)
             w = int(x2 - x1)
-            if self.use_sameWHcrop[label]:
+            if self.use_sameWH_crop[label]:
                 w_offset = int(np.maximum(h, w) * self.pad_factors[label])
                 h_offset = int(np.maximum(h, w) * self.pad_factors[label])
             else:
@@ -245,7 +242,7 @@ class PoseEstimator:
                                                     self.intrinsic_matrix, 
                                                     1, 
                                                     self.train_args,
-                                                    self.codebook._get_codebook_name(self.ply_model_paths[class_idx]),
+                                                    self.codebook._get_codebook_name(self.ply_centered_paths[class_idx]),
                                                     refine=False)
             H_aae[:3,:3] = R_est
             H_aae[:3, 3] = t_est 
@@ -266,7 +263,7 @@ class PoseEstimator:
         for i, (pose_estimate, label) in enumerate(zip(all_pose_estimates, labels)):
             # crop cloud with instance mask   
             is_mask = is_masks[i].copy()
-            is_mask[is_mask < 0.9] = 0
+            is_mask[is_mask < 0.5] = 0
             is_mask_original = cv2.resize(is_mask, (rgb_original.shape[1], rgb_original.shape[0]), interpolation=cv2.INTER_AREA)
             cloud_cam_obj = crop_o3d_cloud_with_mask(cloud_cam, is_mask_original, camera_info=self.camera_info)
             class_id = self.pe_class_names.index(self.is_class_names[label])
@@ -276,12 +273,12 @@ class PoseEstimator:
             cloud_obj = copy.deepcopy(self.cloud_objs[class_id])
             H_obj2cam = np.eye(4)
             # add centeroids for misaligned CAD
-            H_obj2cam[:3, 3] = - cloud_obj.get_center() + self.centroids[class_id] * 0.001
+            H_obj2cam[:3, 3] = - cloud_obj.get_center() + self.centroids[class_id]
             cloud_obj = cloud_obj.transform(H_obj2cam)
             # transform cloud_obj to the estimated 6d pose
             H_aae_cam2obj = np.eye(4)
             H_aae_cam2obj[:3, :3] = pose_estimate[:3, :3]
-            H_aae_cam2obj[:3, 3] = 0.001 * pose_estimate[:3, 3]   # align scale
+            H_aae_cam2obj[:3, 3] = pose_estimate[:3, 3]   # align scale
             cloud_obj = cloud_obj.transform(H_aae_cam2obj)
             # translate cloud_obj to the centroid of cloud cam
             H_obj_to_cam_centroid = cloud_cam_obj.get_center() - cloud_obj.get_center()
@@ -290,6 +287,7 @@ class PoseEstimator:
             all_pose_estimates[i][:3, 3] = H_aae_cam2obj[:3, 3] * 1000
             cloud_obj = cloud_obj.translate(H_obj_to_cam_centroid)
 
+            # o3d.visualization.draw_geometries([cloud_obj, cloud_cam_obj])
             # icp refinement
             icp_result, residual = icp_refinement_with_ppf_match(cloud_obj, cloud_cam_obj, 
                                 n_points=self.params["n_points"], n_iter=self.params["n_iter"], tolerance=self.params["tolerance"], num_levels=self.params["num_levels"])
@@ -300,21 +298,21 @@ class PoseEstimator:
             else:
                 H_refined_cam2obj = np.matmul(icp_result, H_aae_cam2obj)
             # gather 6d pose estimation results and publish it
-            translation = H_aae_cam2obj[:3, 3]
+            T_centroid = np.eye(4)
+            T_centroid[:3, 3] = self.centroids[class_id]
+            translation = H_aae_cam2obj[:3, 3] 
             rotation = tf_trans.quaternion_from_matrix(H_aae_cam2obj)
             aae_pose_msg, aae_detection = self.gather_pose_results(camera_header, class_id, translation, rotation, residual)
             translation = H_refined_cam2obj[:3, 3] 
             rotation = tf_trans.quaternion_from_matrix(H_refined_cam2obj)
             icp_pose_msg, icp_detection = self.gather_pose_results(camera_header, class_id, translation, rotation, residual)
 
-            self.aae_pose_pubs[class_id].publish(aae_pose_msg)
-            self.icp_pose_pubs[class_id].publish(icp_pose_msg)
             aae_detections_array.detections.append(aae_detection)
             icp_detections_array.detections.append(icp_detection)
 
         if self.params["debug"]:
             self.publish_vis_is(rgb_img, is_masks, boxes, labels, scores)
-            self.publish_vis_pe(self.pose_aae_vis_pub, all_pose_estimates, labels, boxes, scores, rgb_resized)
+            # self.publish_vis_pe(self.pose_aae_vis_pub, all_pose_estimates, labels, boxes, scores, rgb_resized)
         self.aae_detections_pub.publish(aae_detections_array)
         self.icp_detections_pub.publish(icp_detections_array)
         self.publish_markers(self.aae_markers_pub, aae_detections_array, [13, 255, 128])
@@ -342,9 +340,9 @@ class PoseEstimator:
         hypothesis.score = score
         detections.results.append(hypothesis)
         detections.bbox.center = pose_msg.pose
-        detections.bbox.size.x = self.dims[class_id][0] * 0.001 * 2
-        detections.bbox.size.y = self.dims[class_id][1] * 0.001 * 2
-        detections.bbox.size.z = self.dims[class_id][2] * 0.001 * 2
+        detections.bbox.size.x = self.dims[class_id][0] * 2
+        detections.bbox.size.y = self.dims[class_id][1] * 2
+        detections.bbox.size.z = self.dims[class_id][2] * 2
         return pose_msg, detections
 
 
@@ -379,7 +377,7 @@ class PoseEstimator:
 
 
     def publish_vis_pe(self, publisher, all_pose_estimates, labels, boxes, scores, rgb):
-        renderer = meshrenderer_phong.Renderer(self.ply_model_paths, 
+        renderer = meshrenderer_phong.Renderer(self.ply_paths, 
             samples=1, 
             vertex_tmp_store_folder=get_dataset_path(self.workspace_path),
             vertex_scale=float(1)) # float(1) for some models
@@ -406,7 +404,7 @@ class PoseEstimator:
             y = int(y1)
             h = int(y2 - y1)
             w = int(x2 - x1)
-            if self.use_sameWHcrop[label]:
+            if self.use_sameWH_crop[label]:
                 w_offset = int(np.maximum(h, w) * self.pad_factors[label])
                 h_offset = int(np.maximum(h, w) * self.pad_factors[label])
             else:
@@ -432,7 +430,7 @@ class PoseEstimator:
         # Object markers
         markers = MarkerArray()
         for i, det in enumerate(detections_array.detections):
-            name = self.ply_model_paths[det.results[0].id].split('/')[-1][5:-4]
+            name = self.ply_paths[det.results[0].id].split('/')[-1][5:-4]
             # cube marker
             marker = Marker()
             marker.header = detections_array.header
@@ -476,10 +474,10 @@ class PoseEstimator:
             marker.ns = "meshes"
             marker.id = i
             marker.type = Marker.MESH_RESOURCE
-            marker.scale.x = 0.001
-            marker.scale.y = 0.001
-            marker.scale.z = 0.001
-            marker.mesh_resource = "file://" + self.ply_model_paths[det.results[0].id]
+            marker.scale.x = 1
+            marker.scale.y = 1
+            marker.scale.z = 1
+            marker.mesh_resource = "file://" + self.ply_paths[det.results[0].id]
             marker.mesh_use_embedded_materials = True
             markers.markers.append(marker)
         publisher.publish(markers)

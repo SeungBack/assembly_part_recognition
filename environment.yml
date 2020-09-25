@@ -24,7 +24,6 @@ dependencies:
   - wheel=0.35.1=py_0
   - zlib=1.2.11=h7b6447c_3
   - pip:
-    - auto-pose==0.9.2
     - open3d-ros-helper==0.0.1.6
     - pip==20.2.3
     - pyside2==5.15.1

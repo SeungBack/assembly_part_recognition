@@ -12,7 +12,6 @@ is_config_path: "/home/demo/Workspace/Assembly-Part-Segmentation/furniture_part_
 is_weight_path: "/home/demo/catkin_ws/src/assembly_part_recognition/pretrained_weights/furniture_part/train_result/0921_SIM_v1516171820_RGB_only_aug2/epoch_10.tar"
 is_thresh: 0.98
 
-pe_module_path: "/home/demo/Workspace/seung/AugmentedAutoencoder"
 pe_experiment_name: "exp_group/ikea_stefan"
 pe_test_config: "mpaae_maskrcnn_azure.cfg"
 
