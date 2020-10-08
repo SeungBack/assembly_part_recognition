@@ -30,11 +30,14 @@ import time
 import tf2_ros
 import scipy as sp
 import numpy.matlib as npm
+from sklearn.metrics import jaccard_similarity_score
 
 from auto_pose.ae import utils as u
 from auto_pose.ae import ae_factory as factory
 from auto_pose.ae.utils import get_dataset_path
 from auto_pose.meshrenderer import meshrenderer_phong
+from auto_pose.meshrenderer.pysixd import misc, visibility
+import matplotlib.pyplot as plt
 
 
 class PoseEstimator:
@@ -70,9 +73,10 @@ class PoseEstimator:
         self.initialize_is_model()
         self.initialize_pose_est_model()
         rgb_sub = message_filters.Subscriber(self.params["rgb"], Image, buff_size=720*1280*3)
+        rgb_rect_sub = message_filters.Subscriber(self.params["rgb_rect"], Image, buff_size=720*1280*3)
         depth_sub = message_filters.Subscriber(self.params["depth"], Image, buff_size=720*1280)
         point_sub = message_filters.Subscriber(self.params["point"], PointCloud2, buff_size=720*1280*3)
-        self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub, point_sub], queue_size=1, slop=1)
+        self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, rgb_rect_sub, depth_sub, point_sub], queue_size=1, slop=1)
         self.ts.registerCallback(self.inference)
         self.camera_info = rospy.wait_for_message(self.params["camera_info"], CameraInfo)
         self.intrinsic_matrix = np.array(self.camera_info.K).reshape(3, 3)
@@ -84,9 +88,10 @@ class PoseEstimator:
         self.icp_detections_pub = rospy.Publisher('/assembly/detections/icp', Detection3DArray, queue_size=1)
         self.aae_markers_pub = rospy.Publisher('/assembly/markers/aae', MarkerArray, queue_size=1)
         self.icp_markers_pub = rospy.Publisher('/assembly/markers/icp', MarkerArray, queue_size=1)
-        if self.params["debug"]:
-            self.vis_is_pub = rospy.Publisher('/assembly/vis_is', Image, queue_size=1)
-            # self.pose_aae_vis_pub = rospy.Publisher('/assembly/vis_pe_aae', Image, queue_size=1)
+        self.vis_is_pub = rospy.Publisher('/assembly/vis_is', Image, queue_size=1)
+        self.pose_aae_vis_pub = rospy.Publisher('/assembly/vis_pe_aae', Image, queue_size=1)
+        self.vis_pe_costmap = rospy.Publisher('/assembly/vis_pe_costmap', Image, queue_size=1)
+
 
     def initialize_is_model(self):
         import torch
@@ -97,6 +102,7 @@ class PoseEstimator:
         with open(self.params["is_config_path"]) as config_file:
             self.config = json.load(config_file)
         # build model
+        os.environ["CUDA_VISIBLE_DEVICES"] = self.params["is_gpu_id"]
         self.model = maskrcnn.get_model_instance_segmentation(num_classes=5, config=self.config)
         self.model.load_state_dict(torch.load(self.params["is_weight_path"]))
         os.environ["CUDA_VISIBLE_DEVICES"] = self.params["gpu_id"]
@@ -112,8 +118,9 @@ class PoseEstimator:
 
     def initialize_pose_est_model(self):
         import tensorflow as tf
+
         rospy.loginfo("Loading AAE model")
-        os.environ["CUDA_VISIBLE_DEVICES"] = self.params["gpu_id"]
+        os.environ["CUDA_VISIBLE_DEVICES"] = self.params["pe_gpu_id"]
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
         tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
         self.workspace_path = os.environ.get('AE_WORKSPACE_PATH')
@@ -158,26 +165,27 @@ class PoseEstimator:
         saver = tf.train.Saver()
         checkpoint_file = u.get_checkpoint_basefilename(log_dir, False, latest=self.train_args.getint('Training', 'NUM_ITER'), joint=True)
         saver.restore(self.sess, checkpoint_file)
-          
+       
 
-    def inference(self, rgb, depth, pcl_msg):
+
+    def inference(self, rgb, rgb_rect, depth, pcl_msg):
         ## 1. Get rgb, depth, point cloud
         start_time = time.time()
-
-        rgb_original = self.bridge.imgmsg_to_cv2(rgb, desired_encoding='bgr8')
-        rgb_resized = cv2.resize(rgb_original.copy(), (self.params["width"], self.params["height"]))
         camera_header = rgb.header
-
-        depth_original = self.bridge.imgmsg_to_cv2(depth, desired_encoding='32FC1')
-        depth_resized = cv2.resize(depth_original.copy(), dsize=(self.params["width"], self.params["height"]), interpolation=cv2.INTER_AREA)
-
         rgb = self.bridge.imgmsg_to_cv2(rgb, desired_encoding='bgr8')
         rgb = PIL.Image.fromarray(np.uint8(rgb), mode="RGB")
-        rgb = rgb.resize((self.params["width"], self.params["height"]), PIL.Image.BICUBIC)
-        rgb_img = np.uint8(rgb)
-        rgb = self.rgb_transform(rgb_img).unsqueeze(0)
-        rospy.logdebug("-------------------------------------")
-        rospy.logdebug("Get Input \t {}".format(time.time()-start_time))
+        rgb_img = np.uint8(rgb.resize((self.params["width"], self.params["height"]), PIL.Image.BICUBIC))
+
+        rgb_rect = self.bridge.imgmsg_to_cv2(rgb_rect, desired_encoding='bgr8')
+        rgb_rect = PIL.Image.fromarray(np.uint8(rgb_rect), mode="RGB")
+        rgb_rect_img = np.uint8(rgb_rect.resize((self.params["width"], self.params["height"]), PIL.Image.BICUBIC))
+
+        depth = self.bridge.imgmsg_to_cv2(depth, desired_encoding='32FC1')
+        depth = cv2.resize(depth, dsize=(self.params["width"], self.params["height"]), interpolation=cv2.INTER_AREA)
+
+        rgb = self.rgb_transform(rgb_rect_img).unsqueeze(0)
+        print("-------------------------------------")
+        print("=> Get Input \t {}".format(time.time()-start_time))
 
         ## 2. Instance Segmentation using Mask R-CNN
         is_results = self.model(rgb.to(self.device))[0]
@@ -185,7 +193,7 @@ class PoseEstimator:
         pred_boxes = is_results['boxes'].cpu().detach().numpy()
         pred_labels = is_results['labels'].cpu().detach().numpy()
         pred_scores = is_results['scores'].cpu().detach().numpy()
-        boxes, scores, labels, rgb_crops, is_masks = [], [], [], [], []
+        boxes, scores, is_obj_ids, rgb_crops, is_masks = [], [], [], [], []
         for i, (label, (x1, y1, x2, y2), score, mask) in enumerate(zip(pred_labels, pred_boxes, pred_scores, pred_masks)):
             if score < self.params["is_thresh"]:
                 continue
@@ -194,7 +202,7 @@ class PoseEstimator:
             boxes.append(np.array([x1, y1, x2, y2]))
             scores.append(score)
             label = label-1
-            labels.append(label)
+            is_obj_ids.append(label)
             is_masks.append(mask[0])
             if self.use_masked_crop[label]:
                 mask[mask >= 0.5] = 1
@@ -226,13 +234,13 @@ class PoseEstimator:
                 rgb_crop[:,(x+w-left):] = 0
             rgb_crop = cv2.resize(rgb_crop, (128, 128), interpolation=cv2.INTER_NEAREST)
             rgb_crops.append(rgb_crop)
-        rospy.logdebug("Inst Seg \t {}".format(time.time()-start_time))
+        print("=> Inst Seg \t {}".format(time.time()-start_time))
 
         ## 3. 6D Object Pose Estimation using MPAAE
         if len(is_masks) == 0:
             return
         all_pose_estimates = []
-        for i, (box, score, label, rgb_crop) in enumerate(zip(boxes, scores, labels, rgb_crops)):
+        for i, (box, score, label, rgb_crop) in enumerate(zip(boxes, scores, is_obj_ids, rgb_crops)):
             box_xywh = [box[0], box[1], box[2]-box[0], box[3]-box[1]]
             H_aae = np.eye(4)
             class_idx = self.pe_class_names.index(self.is_class_names[label])
@@ -247,33 +255,32 @@ class PoseEstimator:
             H_aae[:3,:3] = R_est
             H_aae[:3, 3] = t_est 
             all_pose_estimates.append(H_aae)     
-        rospy.logdebug("Pose Est \t {}".format(time.time()-start_time))
+        print("=> Pose Est \t {}".format(time.time()-start_time))
 
         ## 4. 6D Object Pose Refinement using ICP 
-        aae_detections_array = Detection3DArray()
-        aae_detections_array.header = camera_header
-        icp_detections_array = Detection3DArray()
-        icp_detections_array.header = camera_header
         if "merged" in self.params["point"]:
             cloud_map = convert_ros_to_o3d(pcl_msg) 
             cloud_cam = do_transform_o3d_cloud(copy.deepcopy(cloud_map), self.transform_map_to_cam)
         else:
             cloud_cam = convert_ros_to_o3d(pcl_msg, remove_nans=True) 
 
-        for i, (pose_estimate, label) in enumerate(zip(all_pose_estimates, labels)):
+        aae_trans = []
+        aae_rot = []
+        icp_trans = []
+        icp_rot = []
+        for i, (pose_estimate, label) in enumerate(zip(all_pose_estimates, is_obj_ids)):
             # crop cloud with instance mask   
             is_mask = is_masks[i].copy()
             is_mask[is_mask < 0.5] = 0
-            is_mask_original = cv2.resize(is_mask, (rgb_original.shape[1], rgb_original.shape[0]), interpolation=cv2.INTER_AREA)
-            cloud_cam_obj = crop_o3d_cloud_with_mask(cloud_cam, is_mask_original, camera_info=self.camera_info)
-            class_id = self.pe_class_names.index(self.is_class_names[label])
+            cloud_cam_obj = crop_o3d_cloud_with_mask(cloud_cam, is_mask, camera_info=self.camera_info)
+            pe_obj_id = self.pe_class_names.index(self.is_class_names[label])
             # cloud_cam_obj, index = cloud_cam_obj.remove_statistical_outlier(nb_neighbors = 50, std_ratio=0.2)
             
             # transform cloud_obj to the origin of camera frame
-            cloud_obj = copy.deepcopy(self.cloud_objs[class_id])
+            cloud_obj = copy.deepcopy(self.cloud_objs[pe_obj_id])
             H_obj2cam = np.eye(4)
             # add centeroids for misaligned CAD
-            H_obj2cam[:3, 3] = - cloud_obj.get_center() + self.centroids[class_id]
+            H_obj2cam[:3, 3] = - cloud_obj.get_center() + self.centroids[pe_obj_id]
             cloud_obj = cloud_obj.transform(H_obj2cam)
             # transform cloud_obj to the estimated 6d pose
             H_aae_cam2obj = np.eye(4)
@@ -286,39 +293,50 @@ class PoseEstimator:
             H_aae_cam2obj[:3, 3] = H_aae_cam2obj[:3, 3] + H_obj_to_cam_centroid
             all_pose_estimates[i][:3, 3] = H_aae_cam2obj[:3, 3] * 1000
             cloud_obj = cloud_obj.translate(H_obj_to_cam_centroid)
-
             # o3d.visualization.draw_geometries([cloud_obj, cloud_cam_obj])
+            
             # icp refinement
             icp_result, residual = icp_refinement_with_ppf_match(cloud_obj, cloud_cam_obj, 
                                 n_points=self.params["n_points"], n_iter=self.params["n_iter"], tolerance=self.params["tolerance"], num_levels=self.params["num_levels"])
-            rospy.logdebug("{}: \t res: {}".format(self.is_class_names[label], residual))
-            # if icp diverges
-            if residual > 0.02:
-                H_refined_cam2obj = H_aae_cam2obj
-            else:
-                H_refined_cam2obj = np.matmul(icp_result, H_aae_cam2obj)
-            # gather 6d pose estimation results and publish it
+            # print("{}: \t res: {}".format(self.is_class_names[label], residual))
+            H_refined_cam2obj = np.matmul(icp_result, H_aae_cam2obj)
+
+            all_pose_estimates[i][:3, :3] = H_refined_cam2obj[:3, :3]
             T_centroid = np.eye(4)
-            T_centroid[:3, 3] = self.centroids[class_id]
+            T_centroid[:3, 3] = self.centroids[pe_obj_id]
+
             translation = H_aae_cam2obj[:3, 3] 
             rotation = tf_trans.quaternion_from_matrix(H_aae_cam2obj)
-            aae_pose_msg, aae_detection = self.gather_pose_results(camera_header, class_id, translation, rotation, residual)
+            aae_trans.append(translation)
+            aae_rot.append(rotation)
+
             translation = H_refined_cam2obj[:3, 3] 
             rotation = tf_trans.quaternion_from_matrix(H_refined_cam2obj)
-            icp_pose_msg, icp_detection = self.gather_pose_results(camera_header, class_id, translation, rotation, residual)
+            icp_trans.append(translation)
+            icp_rot.append(rotation)
+        print("=> ICP \t {}".format(time.time()-start_time))
 
+        # 5. calculate reprojection error (VSD) and publish the detection3D
+        pe_obj_ids, pe_masks, pe_depth = self.reproject_pe(self.pose_aae_vis_pub, all_pose_estimates, is_obj_ids, boxes, scores, rgb_img)
+        vsd_errors = self.get_vsd_error(self.vis_pe_costmap, is_masks, is_obj_ids, depth, pe_masks, pe_obj_ids, pe_depth)
+        aae_detections_array = Detection3DArray()
+        aae_detections_array.header = camera_header
+        icp_detections_array = Detection3DArray()
+        icp_detections_array.header = camera_header
+        print("=> Get reprojErr \t {}".format(time.time()-start_time))
+        for i, is_obj_id in enumerate(is_obj_ids):
+            class_id = self.pe_class_names.index(self.is_class_names[is_obj_id])
+            aae_pose_msg, aae_detection = self.gather_pose_results(camera_header, class_id, aae_trans[i], aae_rot[i], vsd_errors[i])
+            icp_pose_msg, icp_detection = self.gather_pose_results(camera_header, class_id, icp_trans[i], icp_rot[i], vsd_errors[i])
             aae_detections_array.detections.append(aae_detection)
             icp_detections_array.detections.append(icp_detection)
 
-        if self.params["debug"]:
-            self.publish_vis_is(rgb_img, is_masks, boxes, labels, scores)
-            # self.publish_vis_pe(self.pose_aae_vis_pub, all_pose_estimates, labels, boxes, scores, rgb_resized)
+        self.publish_vis_is(rgb_rect_img, is_masks, boxes, is_obj_ids, scores)
         self.aae_detections_pub.publish(aae_detections_array)
         self.icp_detections_pub.publish(icp_detections_array)
         self.publish_markers(self.aae_markers_pub, aae_detections_array, [13, 255, 128])
         self.publish_markers(self.icp_markers_pub, icp_detections_array, [128, 128, 255])
 
-        rospy.logdebug("ICP \t {}".format(time.time()-start_time))
 
     def gather_pose_results(self, header, class_id, translation, rotation, score):
         
@@ -346,15 +364,15 @@ class PoseEstimator:
         return pose_msg, detections
 
 
-    def publish_vis_is(self, rgb_img, masks, boxes, labels, score):
+    def publish_vis_is(self, rgb_img, masks, boxes, is_obj_ids, score):
         
-        if len(labels) == 0:
+        if len(is_obj_ids) == 0:
             return rgb_img
         cv2.rectangle(rgb_img, (self.roi[0], self.roi[2]), (self.roi[1], self.roi[3]), (0, 0, 255), 3)
         cv2.putText(rgb_img, "ROI", (self.roi[0], self.roi[2] - 15), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
         mask_all = np.zeros_like(rgb_img)
 
-        for i in range(len(labels)):
+        for i in range(len(is_obj_ids)):
             x1, y1, x2, y2 = boxes[i]
             if x1 < self.roi[0] or x2 > self.roi[1] or y1 < self.roi[2] or y2 > self.roi[3]:
                 color = (128, 128, 0)
@@ -365,10 +383,10 @@ class PoseEstimator:
             mask = masks[i]
             mask[mask >= 0.5] = 1
             mask[mask < 0.5] = 0
-            mask_all[mask.astype(np.bool)] = self.classidx2color[labels[i]-1]
+            mask_all[mask.astype(np.bool)] = self.classidx2color[is_obj_ids[i]-1]
 
             cv2.rectangle(rgb_img, (x1, y1), (x2, y2), color, lw)
-            cv2.putText(rgb_img, self.is_class_names[labels[i]] + str(score[i].item())[:4], \
+            cv2.putText(rgb_img, self.is_class_names[is_obj_ids[i]] + str(score[i].item())[:4], \
                 (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 1, color, lw)
 
 
@@ -376,28 +394,33 @@ class PoseEstimator:
         self.vis_is_pub.publish(self.bridge.cv2_to_imgmsg(rgb_img))
 
 
-    def publish_vis_pe(self, publisher, all_pose_estimates, labels, boxes, scores, rgb):
-        renderer = meshrenderer_phong.Renderer(self.ply_paths, 
+    def reproject_pe(self, publisher, all_pose_estimates, is_obj_ids, boxes, scores, rgb):
+
+        self.renderer = meshrenderer_phong.Renderer(self.ply_paths, 
             samples=1, 
             vertex_tmp_store_folder=get_dataset_path(self.workspace_path),
-            vertex_scale=float(1)) # float(1) for some models
-        bgr, depth, _ = renderer.render_many(obj_ids = [self.pe_class_names.index(self.is_class_names[label]) for label in labels],
-                            W = self.params["width"],
-                            H = self.params["height"],
-                            K = self.intrinsic_matrix, 
-                            Rs = [pose_est[:3,:3] for pose_est in all_pose_estimates],
-                            ts = [pose_est[:3, 3] for pose_est in all_pose_estimates],
-                            near = 10,
-                            far = 10000,
-                            random_light=False,
-                            phong={'ambient':0.4,'diffuse':0.8, 'specular':0.3})
+            vertex_scale=float(1000)) # float(1) for some models
+        pe_obj_ids = [self.pe_class_names.index(self.is_class_names[label]) for label in is_obj_ids]
+        bgr, depth, _, masks = self.renderer.render_many(obj_ids = pe_obj_ids,
+                W = self.params["width"],
+                H = self.params["height"],
+                K = self.intrinsic_matrix, 
+                Rs = [pose_est[:3,:3] for pose_est in all_pose_estimates],
+                ts = [pose_est[:3, 3] for pose_est in all_pose_estimates],
+                near = 10,
+                far = 10000,
+                random_light=False,
+                phong={'ambient':0.4,'diffuse':0.8, 'specular':0.3},
+                return_masks=True
+                )
+        self.renderer.close()
+
         bgr = cv2.resize(bgr, (self.params["width"], self.params["height"]))
-        
         g_y = np.zeros_like(bgr)
         g_y[:,:,0] = bgr[:,:,0]    
         im_bg = cv2.bitwise_and(rgb, rgb, mask=(g_y[:,:,0]==0).astype(np.uint8))                 
         image_show = cv2.addWeighted(im_bg, 1, g_y, 1, 0)
-        for label, box, score in zip(labels, boxes, scores):
+        for label, box, score in zip(is_obj_ids, boxes, scores):
             box = box.astype(np.int32)
             x1, y1, x2, y2 = box
             x = int(x1)
@@ -418,6 +441,58 @@ class PoseEstimator:
             cv2.rectangle(image_show, (left, top), (right, bottom), (0, 255, 0), 3)
         imgmsg = self.bridge.cv2_to_imgmsg(image_show, "bgr8")
         publisher.publish(imgmsg)
+        return pe_obj_ids, masks, depth
+
+
+    def get_vsd_error(self, publisher, is_masks, is_obj_ids, cam_depth, pe_masks, pe_obj_ids, pe_depth):
+        
+        vsd_errors = []
+        cost_map = np.zeros([self.params["height"], self.params["width"]])
+        for i, is_obj_id in enumerate(is_obj_ids):
+            for j, pe_obj_id in enumerate(pe_obj_ids):
+                if pe_obj_id == self.pe_class_names.index(self.is_class_names[is_obj_id]):
+                    is_mask = is_masks[i]
+                    is_mask[is_mask > 0.5] = 1
+                    is_mask[is_mask < 0] = 0
+                    pe_mask = pe_masks[j]
+                    # from https://github.com/thodan/sixd_toolkit
+                    # Convert depth images to distance images
+                    dist_cam = misc.depth_im_to_dist_im(cam_depth, self.intrinsic_matrix) * 1000
+                    dist_est = misc.depth_im_to_dist_im(pe_depth, self.intrinsic_matrix)
+                    # Visibility mask of the model in the ground truth pose
+                    visb_cam = visibility.estimate_visib_mask_gt(dist_cam, dist_cam, self.params["delta"])
+                    # Visibility mask of the model in the estimated pose
+                    visib_est = visibility.estimate_visib_mask_est(dist_cam, dist_est, visb_cam, self.params["delta"])
+                    # Intersection and union of the visibility masks
+                    visib_inter = np.logical_and(is_mask, pe_mask)
+                    visib_union = np.logical_or(is_mask, pe_mask)
+                    # Pixel-wise matching cost
+                    costs = np.abs(dist_cam[visib_inter] - dist_est[visib_inter])
+                    if self.params["cost_type"] == 'step':
+                        costs = costs >= self.params["tau"]
+                    elif self.params["cost_type"] == 'tlinear': # Truncated linear
+                        costs *= (1.0 / self.params["tau"])
+                        costs[costs > 1.0] = 1.0
+                    else:
+                        print('Error: Unknown pixel matching cost.')
+                        exit(-1)
+                    costs_vis = np.ones(dist_cam.shape)
+                    costs_vis[visib_inter] = costs
+                    cost_map += costs_vis
+
+                    # Visible Surface Discrepancy
+                    visib_union_count = visib_union.sum()
+                    visib_comp_count = visib_union_count - visib_inter.sum()
+                    if visib_union_count > 0:
+                        e = (costs.sum() + visib_comp_count) / float(visib_union_count)
+                    else:
+                        e = 1.0
+                    print("vsd: {}\t{}".format(self.is_class_names[is_obj_id].split('_')[-1], e))
+                    vsd_errors.append(e)
+        cost_map = cv2.normalize(cost_map, cost_map, 0, 255, cv2.NORM_MINMAX)
+        cost_map = cv2.applyColorMap(np.uint8(cost_map), cv2.COLORMAP_JET)
+        publisher.publish(self.bridge.cv2_to_imgmsg(cost_map, "bgr8"))
+        return vsd_errors
 
     def publish_markers(self, publisher, detections_array, color):
         # Delete all existing markers

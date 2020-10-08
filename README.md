@@ -75,6 +75,7 @@ $ ROS_NAMESPACE=azure1 roslaunch azure_kinect_ros_driver driver.launch color_res
 2. launch k4a manager 
 ```
 $ roslaunch assembly_camera_manager single_azure_manager.launch target_fiducial_id:="1"
+$ ROS_NAMESPACE=azure1 rosrun image_proc image_proc image_raw:=/azure1/rgb/image_raw camera_info:=/azure1/rgb/camera_info
 ```
 3. camera to map calibration 
 ```

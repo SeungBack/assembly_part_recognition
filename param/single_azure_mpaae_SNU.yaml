@@ -1,5 +1,4 @@
 gpu_id: "1"
-debug: true
 camera_info: "/azure1/rgb/camera_info"
 camera_frame: "azure1_rgb_camera_link"
 rgb: "/azure1/rgb/image_raw"
