@@ -6,7 +6,7 @@
 - 6d pose estimation using [Augmented AutoEncoder (AAE)](https://openaccess.thecvf.com/content_ECCV_2018/html/Martin_Sundermeyer_Implicit_3D_Orientation_ECCV_2018_paper.html) and [Multi-Path Augmented AutoEncoder (MPAAE)](https://openaccess.thecvf.com/content_CVPR_2020/html/Sundermeyer_Multi-Path_Learning_for_Object_Pose_Estimation_Across_Domains_CVPR_2020_paper.html)
 
 ![mpaae_sample](./MPAAE_sample.png)
-![detection_sample](./detection_sample.png)
+![recognition_demo](./recognition_demo.gif)
 
 
 ## To Do
