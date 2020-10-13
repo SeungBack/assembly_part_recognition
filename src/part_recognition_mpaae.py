@@ -30,7 +30,6 @@ import time
 import tf2_ros
 import scipy as sp
 import numpy.matlib as npm
-from sklearn.metrics import jaccard_similarity_score
 
 from auto_pose.ae import utils as u
 from auto_pose.ae import ae_factory as factory
@@ -73,10 +72,10 @@ class PoseEstimator:
         self.initialize_is_model()
         self.initialize_pose_est_model()
         rgb_sub = message_filters.Subscriber(self.params["rgb"], Image, buff_size=720*1280*3)
-        rgb_rect_sub = message_filters.Subscriber(self.params["rgb_rect"], Image, buff_size=720*1280*3)
+        # rgb_rect_sub = message_filters.Subscriber(self.params["rgb_rect"], Image, buff_size=720*1280*3)
         depth_sub = message_filters.Subscriber(self.params["depth"], Image, buff_size=720*1280)
         point_sub = message_filters.Subscriber(self.params["point"], PointCloud2, buff_size=720*1280*3)
-        self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, rgb_rect_sub, depth_sub, point_sub], queue_size=1, slop=1)
+        self.ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub, point_sub], queue_size=1, slop=1)
         self.ts.registerCallback(self.inference)
         self.camera_info = rospy.wait_for_message(self.params["camera_info"], CameraInfo)
         self.intrinsic_matrix = np.array(self.camera_info.K).reshape(3, 3)
@@ -90,7 +89,8 @@ class PoseEstimator:
         self.icp_markers_pub = rospy.Publisher('/assembly/markers/icp', MarkerArray, queue_size=1)
         self.vis_is_pub = rospy.Publisher('/assembly/vis_is', Image, queue_size=1)
         self.pose_aae_vis_pub = rospy.Publisher('/assembly/vis_pe_aae', Image, queue_size=1)
-        self.vis_pe_costmap = rospy.Publisher('/assembly/vis_pe_costmap', Image, queue_size=1)
+        self.vis_vsd_costmap = rospy.Publisher('/assembly/vis_vsd_costmap', Image, queue_size=1)
+        self.vis_cou_costmap = rospy.Publisher('/assembly/vis_cou_costmap', Image, queue_size=1)
 
 
     def initialize_is_model(self):
@@ -105,7 +105,6 @@ class PoseEstimator:
         os.environ["CUDA_VISIBLE_DEVICES"] = self.params["is_gpu_id"]
         self.model = maskrcnn.get_model_instance_segmentation(num_classes=5, config=self.config)
         self.model.load_state_dict(torch.load(self.params["is_weight_path"]))
-        os.environ["CUDA_VISIBLE_DEVICES"] = self.params["gpu_id"]
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
         self.model.eval()
@@ -168,7 +167,7 @@ class PoseEstimator:
        
 
 
-    def inference(self, rgb, rgb_rect, depth, pcl_msg):
+    def inference(self, rgb, depth, pcl_msg):
         ## 1. Get rgb, depth, point cloud
         start_time = time.time()
         camera_header = rgb.header
@@ -176,16 +175,16 @@ class PoseEstimator:
         rgb = PIL.Image.fromarray(np.uint8(rgb), mode="RGB")
         rgb_img = np.uint8(rgb.resize((self.params["width"], self.params["height"]), PIL.Image.BICUBIC))
 
-        rgb_rect = self.bridge.imgmsg_to_cv2(rgb_rect, desired_encoding='bgr8')
-        rgb_rect = PIL.Image.fromarray(np.uint8(rgb_rect), mode="RGB")
-        rgb_rect_img = np.uint8(rgb_rect.resize((self.params["width"], self.params["height"]), PIL.Image.BICUBIC))
+        # rgb_rect = self.bridge.imgmsg_to_cv2(rgb_rect, desired_encoding='bgr8')
+        # rgb_rect = PIL.Image.fromarray(np.uint8(rgb_rect), mode="RGB")
+        # rgb_rect_img = np.uint8(rgb_rect.resize((self.params["width"], self.params["height"]), PIL.Image.BICUBIC))
 
         depth = self.bridge.imgmsg_to_cv2(depth, desired_encoding='32FC1')
         depth = cv2.resize(depth, dsize=(self.params["width"], self.params["height"]), interpolation=cv2.INTER_AREA)
 
-        rgb = self.rgb_transform(rgb_rect_img).unsqueeze(0)
+        rgb = self.rgb_transform(rgb_img).unsqueeze(0)
         print("-------------------------------------")
-        print("=> Get Input \t {}".format(time.time()-start_time))
+        # print("=> Get Input \t {}".format(time.time()-start_time))
 
         ## 2. Instance Segmentation using Mask R-CNN
         is_results = self.model(rgb.to(self.device))[0]
@@ -206,7 +205,7 @@ class PoseEstimator:
             is_masks.append(mask[0])
             if self.use_masked_crop[label]:
                 mask[mask >= 0.5] = 1
-                mask[mask < 0.5] = 0.0
+                mask[mask < 0.5] = 0.3
                 mask = np.repeat(mask, 3, 0)
                 mask = np.transpose(mask, (1, 2, 0))
                 masked_img = rgb_img * mask 
@@ -234,7 +233,7 @@ class PoseEstimator:
                 rgb_crop[:,(x+w-left):] = 0
             rgb_crop = cv2.resize(rgb_crop, (128, 128), interpolation=cv2.INTER_NEAREST)
             rgb_crops.append(rgb_crop)
-        print("=> Inst Seg \t {}".format(time.time()-start_time))
+        # print("=> Inst Seg \t {}".format(time.time()-start_time))
 
         ## 3. 6D Object Pose Estimation using MPAAE
         if len(is_masks) == 0:
@@ -255,7 +254,7 @@ class PoseEstimator:
             H_aae[:3,:3] = R_est
             H_aae[:3, 3] = t_est 
             all_pose_estimates.append(H_aae)     
-        print("=> Pose Est \t {}".format(time.time()-start_time))
+        # print("=> Pose Est \t {}".format(time.time()-start_time))
 
         ## 4. 6D Object Pose Refinement using ICP 
         if "merged" in self.params["point"]:
@@ -299,7 +298,10 @@ class PoseEstimator:
             icp_result, residual = icp_refinement_with_ppf_match(cloud_obj, cloud_cam_obj, 
                                 n_points=self.params["n_points"], n_iter=self.params["n_iter"], tolerance=self.params["tolerance"], num_levels=self.params["num_levels"])
             # print("{}: \t res: {}".format(self.is_class_names[label], residual))
-            H_refined_cam2obj = np.matmul(icp_result, H_aae_cam2obj)
+            if residual < 1:
+                H_refined_cam2obj = np.matmul(icp_result, H_aae_cam2obj)
+            else:
+                H_refined_cam2obj = H_aae_cam2obj
 
             all_pose_estimates[i][:3, :3] = H_refined_cam2obj[:3, :3]
             T_centroid = np.eye(4)
@@ -314,24 +316,26 @@ class PoseEstimator:
             rotation = tf_trans.quaternion_from_matrix(H_refined_cam2obj)
             icp_trans.append(translation)
             icp_rot.append(rotation)
-        print("=> ICP \t {}".format(time.time()-start_time))
+        # print("=> ICP \t {}".format(time.time()-start_time))
 
         # 5. calculate reprojection error (VSD) and publish the detection3D
         pe_obj_ids, pe_masks, pe_depth = self.reproject_pe(self.pose_aae_vis_pub, all_pose_estimates, is_obj_ids, boxes, scores, rgb_img)
-        vsd_errors = self.get_vsd_error(self.vis_pe_costmap, is_masks, is_obj_ids, depth, pe_masks, pe_obj_ids, pe_depth)
+        vsd_errors = self.get_vsd_error(self.vis_vsd_costmap, is_masks, is_obj_ids, depth, pe_masks, pe_obj_ids, pe_depth)
+        cou_errors = self.get_cou_error(self.vis_cou_costmap, is_masks, is_obj_ids, depth, pe_masks, pe_obj_ids, pe_depth)
+        reproj_errors = np.mean(np.vstack([vsd_errors, cou_errors]), axis=0)
         aae_detections_array = Detection3DArray()
         aae_detections_array.header = camera_header
         icp_detections_array = Detection3DArray()
         icp_detections_array.header = camera_header
-        print("=> Get reprojErr \t {}".format(time.time()-start_time))
+        # print("=> Get reprojErr \t {}".format(time.time()-start_time))
         for i, is_obj_id in enumerate(is_obj_ids):
             class_id = self.pe_class_names.index(self.is_class_names[is_obj_id])
-            aae_pose_msg, aae_detection = self.gather_pose_results(camera_header, class_id, aae_trans[i], aae_rot[i], vsd_errors[i])
-            icp_pose_msg, icp_detection = self.gather_pose_results(camera_header, class_id, icp_trans[i], icp_rot[i], vsd_errors[i])
+            aae_pose_msg, aae_detection = self.gather_pose_results(camera_header, class_id, aae_trans[i], aae_rot[i], reproj_errors[i])
+            icp_pose_msg, icp_detection = self.gather_pose_results(camera_header, class_id, icp_trans[i], icp_rot[i], reproj_errors[i])
             aae_detections_array.detections.append(aae_detection)
             icp_detections_array.detections.append(icp_detection)
 
-        self.publish_vis_is(rgb_rect_img, is_masks, boxes, is_obj_ids, scores)
+        self.publish_vis_is(rgb_img, is_masks, boxes, is_obj_ids, scores)
         self.aae_detections_pub.publish(aae_detections_array)
         self.icp_detections_pub.publish(icp_detections_array)
         self.publish_markers(self.aae_markers_pub, aae_detections_array, [13, 255, 128])
@@ -396,6 +400,8 @@ class PoseEstimator:
 
     def reproject_pe(self, publisher, all_pose_estimates, is_obj_ids, boxes, scores, rgb):
 
+        os.environ["CUDA_VISIBLE_DEVICES"] = self.params["pe_gpu_id"]
+
         self.renderer = meshrenderer_phong.Renderer(self.ply_paths, 
             samples=1, 
             vertex_tmp_store_folder=get_dataset_path(self.workspace_path),
@@ -445,7 +451,8 @@ class PoseEstimator:
 
 
     def get_vsd_error(self, publisher, is_masks, is_obj_ids, cam_depth, pe_masks, pe_obj_ids, pe_depth):
-        
+        print(" vsd\t| score\t|")
+        print("----------------")
         vsd_errors = []
         cost_map = np.zeros([self.params["height"], self.params["width"]])
         for i, is_obj_id in enumerate(is_obj_ids):
@@ -453,7 +460,7 @@ class PoseEstimator:
                 if pe_obj_id == self.pe_class_names.index(self.is_class_names[is_obj_id]):
                     is_mask = is_masks[i]
                     is_mask[is_mask > 0.5] = 1
-                    is_mask[is_mask < 0] = 0
+                    is_mask[is_mask < 0.5] = 0
                     pe_mask = pe_masks[j]
                     # from https://github.com/thodan/sixd_toolkit
                     # Convert depth images to distance images
@@ -467,7 +474,7 @@ class PoseEstimator:
                     visib_inter = np.logical_and(is_mask, pe_mask)
                     visib_union = np.logical_or(is_mask, pe_mask)
                     # Pixel-wise matching cost
-                    costs = np.abs(dist_cam[visib_inter] - dist_est[visib_inter])
+                    costs = np.abs(dist_cam[visib_inter] - dist_est[visib_inter]) 
                     if self.params["cost_type"] == 'step':
                         costs = costs >= self.params["tau"]
                     elif self.params["cost_type"] == 'tlinear': # Truncated linear
@@ -487,12 +494,41 @@ class PoseEstimator:
                         e = (costs.sum() + visib_comp_count) / float(visib_union_count)
                     else:
                         e = 1.0
-                    print("vsd: {}\t{}".format(self.is_class_names[is_obj_id].split('_')[-1], e))
+                    print("{}\t{}".format(self.is_class_names[is_obj_id].split('_')[-1], e))
                     vsd_errors.append(e)
         cost_map = cv2.normalize(cost_map, cost_map, 0, 255, cv2.NORM_MINMAX)
         cost_map = cv2.applyColorMap(np.uint8(cost_map), cv2.COLORMAP_JET)
         publisher.publish(self.bridge.cv2_to_imgmsg(cost_map, "bgr8"))
         return vsd_errors
+
+    def get_cou_error(self, publisher, is_masks, is_obj_ids, cam_depth, pe_masks, pe_obj_ids, pe_depth):
+        print("\n cou\t| score\t|")
+        print("----------------")
+        cou_errors = []
+        cost_map = np.zeros([self.params["height"], self.params["width"]])
+        for i, is_obj_id in enumerate(is_obj_ids):
+            for j, pe_obj_id in enumerate(pe_obj_ids):
+                if pe_obj_id == self.pe_class_names.index(self.is_class_names[is_obj_id]):
+                    is_mask = is_masks[i]
+                    is_mask[is_mask > 0.5] = 1
+                    is_mask[is_mask < 0.5] = 0
+                    pe_mask = pe_masks[j]
+                    # from https://github.com/thodan/sixd_toolkit    
+                    inter = np.logical_and(is_mask, pe_mask)
+                    union = np.logical_or(is_mask, pe_mask)
+                    union_count = float(union.sum())
+                    if union_count > 0:
+                        e = 1.0 - inter.sum() / union_count
+                    else:
+                        e = 1.0
+                    print("{}\t{}".format(self.is_class_names[is_obj_id].split('_')[-1], e))
+                    cou_errors.append(e)
+                    cost_map = np.logical_or(inter, cost_map)
+        cost_map = np.uint8(cost_map) * 255
+        cost_map = cv2.applyColorMap(np.uint8(cost_map), cv2.COLORMAP_JET)
+        publisher.publish(self.bridge.cv2_to_imgmsg(cost_map, "rgb8"))
+        return cou_errors
+
 
     def publish_markers(self, publisher, detections_array, color):
         # Delete all existing markers

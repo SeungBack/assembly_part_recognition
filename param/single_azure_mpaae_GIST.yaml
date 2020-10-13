@@ -29,7 +29,7 @@ n_iter: 1000
 tolerance: 0.005
 num_levels: 5
 # Reprojection Error (VSD)
-cost_type: "unit" # unit or tlinear
+cost_type: "step" # step or tlinear
 delta: 20
 tau: 50
 
